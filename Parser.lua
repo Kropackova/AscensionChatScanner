@@ -3,7 +3,7 @@
 -- What counts as an activity comes from the active pack, see Packs.lua.
 
 AGF = AGF or {}
-AGF.VERSION = "1.0"
+AGF.VERSION = "1.1"
 
 local function trim(s)
 	s = s:gsub("^%s+", "")
@@ -30,6 +30,10 @@ function AGF.Normalize(raw)
 	t = t:gsub(">", " gt ")
 	t = t:gsub("<", " lt ")
 	t = t:gsub("%+%s*(%d)", " plus%1 ")
+	-- A plus straight after a word carries meaning even with no number behind
+	-- it, as in "m+" or "mythic+". It becomes its own token so the neighbours
+	-- stay separate words.
+	t = t:gsub("(%a)%+", "%1 plus ")
 	t = t:gsub("%+", " ")
 	t = t:gsub("[/\\,%.!%?%(%)%[%]{}:;\"'%*%%=|~#&@`^]", " ")
 	t = t:gsub("_", " ")
@@ -1134,6 +1138,90 @@ function AGF.IsPvPContext(t)
 	return pvpContext(t)
 end
 
+-- Mythic keystones. The realm writes them several ways:
+--   "LFM Keystone: Uldaman (3)"    the level rides in brackets
+--   "LFG mythic+7", "LF tank m+"   written as a plus, often with no number
+--   "Completed Mythic: 10"         the highest key the sender has ever run,
+--                                  never the level of the group being formed
+--
+-- The normaliser has already lowered the text, dropped the brackets and
+-- turned "+7" into "plus7", so a bracketed level arrives as a bare number.
+local MYTHIC_WORDS = { "mythic", "mythics", "mythic dungeon", "keystone",
+	"keystones", "mplus", "m plus" }
+
+-- A number straight after one of these counts players, not keystone levels:
+-- "Keystone: Uldaman need 2 dps".
+local NOT_A_LEVEL = {
+	need = true, needs = true, lf = true, lfm = true, lfg = true,
+	inv = true, more = true, want = true, wanted = true, missing = true,
+	x = true, got = true, have = true, spots = true, spot = true,
+}
+
+local MYTHIC_TIERS = { m0 = 0, m1 = 1, m2 = 2, m3 = 3 }
+
+-- True when the post is about a mythic run, with the keystone level whenever
+-- the text states one.
+function AGF.MatchMythic(t)
+	-- The boast goes first, so its number can never be read as a level and its
+	-- "mythic" can never make idle chat look like a group post.
+	local clean = t:gsub("completed%s+mythic%s*%d*", " ")
+	clean = clean:gsub("%s+", " ")
+
+	local level
+	local isMythic = hasAny(clean, MYTHIC_WORDS)
+
+	for token, tier in pairs(MYTHIC_TIERS) do
+		if has(clean, token) then
+			isMythic = true
+			level = level or tier
+		end
+	end
+
+	-- "mythic+7" and "m+7".
+	local plus = clean:match("mythic plus(%d+)") or clean:match(" m plus(%d+)")
+	if plus then
+		isMythic = true
+		level = tonumber(plus)
+	end
+
+	-- "LF +5 MYTHIC KEY GROUP" puts the plus in front of the wording instead of
+	-- behind it. A loose plus one is left alone: "+1" far more often asks for an
+	-- invite than names a keystone.
+	if not level and isMythic then
+		local loose = tonumber(clean:match(" plus(%d+)") or "")
+		if loose and loose >= 2 and loose <= 40 then
+			level = loose
+		end
+	end
+
+	-- "Keystone: Wailing Caverns - Pit of the Fangs (9)". The first number
+	-- after the word is the level, unless the word in front of it shows the
+	-- number is a head count.
+	if not level then
+		local after = clean:match(" keystone (.*)$")
+		if after then
+			local lead, num = after:match("^(%D-)(%d+)")
+			if num then
+				local prev = lead:match("(%a+)%s*$")
+				if not (prev and NOT_A_LEVEL[prev]) then
+					local n = tonumber(num)
+					if n and n >= 1 and n <= 40 then
+						level = n
+					end
+				end
+			end
+		end
+	end
+
+	-- A bare "m keys" or "push keys" carrying no number at all.
+	if not isMythic and (has(clean, "keys") or has(clean, "key"))
+		and (has(clean, "m") or has(clean, "push")) then
+		isMythic = true
+	end
+
+	return isMythic, level
+end
+
 function AGF.MatchPvP(t)
 	if AGF.MatchHighRisk(t) then
 		return "HR"
@@ -1262,6 +1350,7 @@ function AGF.Parse(raw)
 	t, size = AGF.MarkSize(t)
 	t, ilvl = AGF.MarkIlvl(t)
 	local actId, actName, actShort, target = AGF.MatchActivity(t)
+	local mythicLevel
 
 	-- A line that opens with wts / wtb / wtt is trade whatever it names.
 	local head = t:match("^%s*(%a+)")
@@ -1397,21 +1486,42 @@ function AGF.Parse(raw)
 		end
 	else
 		kind = actId or "OTHER"
-		-- Mythic runs are their own axis in PvE. The activity cell still shows
-		-- the dungeon, so "Dungeon: Ubrs" stays readable while the filter can
-		-- pick every mythic at once.
-		if actId ~= "WB" and actId ~= "WBT" then
-			if has(t, "mythic") or has(t, "mythics") or has(t, "m0")
-				or has(t, "mythic dungeon") then
+		-- Mythic runs are their own axis in PvE. The keystone level replaces the
+		-- caption and the dungeon stays in the target, so a row reads
+		-- "Mythic+ 7: Uldaman".
+		-- Guild recruitment stays a guild even when the advert promises
+		-- mythic runs, and a world boss is never a keystone.
+		if actId ~= "WB" and actId ~= "WBT" and actId ~= "GUILD" then
+			local isMythic, keyLevel = AGF.MatchMythic(t)
+			-- "m2" on its own is a tier, not a place, so it leaves the target
+			-- and becomes the caption.
+			local tier = target and tostring(target):match("^m([0-3])$")
+			if tier then
+				isMythic = true
+				keyLevel = keyLevel or tonumber(tier)
+				target = nil
+			end
+			if isMythic and actId == "RAID" then
+				-- The realm runs mythic raids as well, but a keystone level never
+				-- belongs to one. A number in "LFM MC Mythic 1 tank" counts
+				-- players, so the plus and the level both go: "Mythic: Molten
+				-- Core".
 				kind = "MYTHIC"
-				if actName then
-					-- The dungeon name stays, the row just has to say it is
-					-- mythic: "Mythic Dungeon: Ubrs".
-					actName = "Mythic " .. actName
-					actShort = "Mythic " .. (actShort or actName)
+				mythicLevel = nil
+				actName, actShort = "Mythic", "Mythic"
+			elseif isMythic then
+				kind = "MYTHIC"
+				mythicLevel = keyLevel
+				if keyLevel and keyLevel > 0 then
+					actName = "Mythic+ " .. keyLevel
+				elseif keyLevel == 0 then
+					actName = "Mythic 0"
+				elseif target then
+					actName = "Mythic+"
 				else
-					actName, actShort = "Mythic Dungeon", "Mythic"
+					actName = "Mythic+ Dungeon"
 				end
+				actShort = actName
 			end
 		end
 	end
@@ -1436,6 +1546,7 @@ function AGF.Parse(raw)
 		activity = actId,
 		activityName = actName,
 		activityShort = actShort,
+		mythicLevel = mythicLevel,
 		profession = profession,
 		profMode = profMode,
 		route = route,

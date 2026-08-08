@@ -53,7 +53,7 @@ AGF.KIND_LABEL = {
 	AURA = "Aura", TOME = "Tome", HEIRLOOM = "Heirloom",
 	TRANSMOG = "Transmog", MOUNT = "Mount", RECIPE = "Recipe",
 	LOOTBOT = "Lootbot", CONSUM = "Consumable", GEAR = "Gear",
-	MYTHIC = "Mythic Dungeon",
+	MYTHIC = "Mythic+",
 }
 -- Filled at ingest, so a pack activity shows its short name in the filter.
 AGF.KIND_NAMES = {}

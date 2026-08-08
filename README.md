@@ -40,6 +40,7 @@ Download the release archive from the Releases page, the file listed under **Ass
 - [Troubleshooting](#troubleshooting)
 - [What the addon cannot know](#what-the-addon-cannot-know)
 - [Licence](#licence)
+- [Changelog](CHANGELOG.md)
 
 ---
 
@@ -53,6 +54,7 @@ Download the release archive from the Releases page, the file listed under **Ass
 - **Rows** - pick which columns each section shows; the choice survives a logout.
 - **Alerts** - sound, chat line or popup when a matching post appears, with a scope switch between the active section and everything.
 - **One-click whisper** - six shared templates with ten placeholders: six read from the post, two more on profession rows and two describing your own character.
+- **Mythic keystones** - the keystone level is read from the post and shown in place of the activity, so a row reads `Mythic+ 7: Uldaman`. Item links, `mythic+7`, `m+7` and `M0` are all understood.
 - **Seven skins** and a resizable window that remembers its size and position.
 
 ---
@@ -96,7 +98,7 @@ The number on a tab is how many rows it holds. With a filter on, it reads `4/29`
 | --- | --- |
 | Time | When the post was seen |
 | Name | The sender |
-| Activity | What the post is about, from the content pack: raid, dungeon, random dungeon, world boss, with the named instance or boss where the post gives one |
+| Activity | What the post is about, from the content pack: raid, dungeon, random dungeon, world boss, with the named instance or boss where the post gives one. A mythic keystone shows its level instead: `Mythic+ 7: Uldaman` |
 | Role | Tank, Healer, Damage, where the text says so |
 | Aura | Yes or No from the post; set Maybe by hand when the post is unclear |
 | Looms | Yes or No from the post; set Maybe by hand when the post is unclear |
@@ -207,7 +209,9 @@ The **Skins** button switches between **Vanilla**, **Dark**, **Grid**, **Slate**
 
 A pack decides which activities exist and how they are named. The pack follows your realm.
 
-All three packs read the same content: the vanilla dungeons and raids, the world bosses, the random dungeon finder, guild recruitment and High Risk. They differ only in what the realm adds.
+All three packs read the same content: the vanilla dungeons and raids, the world bosses, the random dungeon finder, mythic keystones, guild recruitment and High Risk. They differ only in what the realm adds.
+
+A mythic post replaces the activity caption with its keystone level, so `LFM [Keystone: Uldaman (3)] need dps` reads `Mythic+ 3: Uldaman`. The level is taken from the bracketed number, from `mythic+7`, from `m+7` and from `LF +5 mythic key`. A number that counts players is left alone, and `Completed Mythic: 10` is ignored altogether, because it states the highest key the sender has ever finished rather than the level of the group. Mythic raids read `Mythic: Molten Core`, without a level, since no keystone applies to a raid. Everything mythic sits behind **Mythic+** in the Activity filter.
 
 Guild recruitment sits in the group tabs but is not a group advert, so it stays hidden until **Guild** is picked in the Activity filter. A guild advert that talks about PvP lands in the PvP tab, everything else in PvE, and the Activity filter offers Guild in both.
 

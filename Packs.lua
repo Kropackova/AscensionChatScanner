@@ -57,7 +57,8 @@ local DUNGEON_WORDS = {
 	"mara", "maraudon", "zf", "uldaman", "ulda", "strat", "stratholme",
 	"wc", "sfk", "bfd", "sm", "st", "dm", "dme", "dmw", "dmn", "dmt",
 	"razorfen", "mgt", "slabs", "arcatraz", "shattered halls",
-	"m0", "m1", "m2", "m3", "mythic", "mythics",
+	"blackrock caverns", "brc",
+	"m0", "m1", "m2", "m3", "mythic", "mythics", "keystone", "keystones",
 	"dungeon", "dungeons",
 }
 
@@ -73,6 +74,7 @@ local DUNGEON_TARGETS = {
 	"mara", "maraudon", "zf", "uldaman", "ulda", "strat", "stratholme",
 	"wc", "sfk", "bfd", "sm", "st", "dme", "dmw", "dmn", "dmt",
 	"razorfen", "mgt", "m0", "m1", "m2", "m3",
+	"blackrock caverns", "brc",
 }
 
 -- Raids. Kept apart from the five man list so the Activity filter can show
@@ -155,10 +157,12 @@ local GUILD_PHRASES = {
 	"hermandad reclutando", "reclutando gente", "reclutando miembros",
 	"buscamos gente para la hermandad", "busco hermandad",
 	"unete a nuestra hermandad", "clan reclutando", "busco clan",
-	"gremio reclutando", "busco gremio",
+	"gremio reclutando", "busco gremio", "gremio recluta",
+	"hermandad recluta", "clan recluta",
 	-- Portuguese
 	"guilda recrutando", "procuro guilda", "recrutando membros",
-	"estamos recrutando", "guilda recruta",
+	"estamos recrutando", "guilda recruta", "recruta membros",
+	"vagas para", "vagas na guilda", "guilda br",
 	-- French
 	"guilde recrute", "nous recrutons", "recrutement guilde",
 	"cherche guilde", "rejoignez notre guilde", "guilde cherche",
@@ -183,6 +187,9 @@ local GUILD_PHRASES = {
 local GUILD_WORDS = {
 	"recruiting", "recruitment", "recruits", "recruit",
 	"reclutando", "reclutamos", "recrutando", "recrutamento",
+	-- The third person, seen in the wild: "la hermandad recluta", "a guilda
+	-- recruta". The gerund alone missed both.
+	"recluta", "recruta",
 	"recrute", "recrutons", "recrutement",
 	"rekrutiert", "rekrutuje", "rekrutacja", "nabirame",
 	"гильдия", "гильдию",
@@ -472,6 +479,8 @@ AGF.PRETTY = {
 	["sunwell plateau"] = "Sunwell Plateau",
 	["hyjal"] = "Mount Hyjal",
 	["mount hyjal"] = "Mount Hyjal",
+	["brc"] = "Blackrock Caverns",
+	["blackrock caverns"] = "Blackrock Caverns",
 	["brd"] = "Blackrock Depths",
 	["blackrock depths"] = "Blackrock Depths",
 	["ubrs"] = "Upper Blackrock Spire",

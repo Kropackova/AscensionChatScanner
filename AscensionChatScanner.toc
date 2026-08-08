@@ -1,8 +1,8 @@
 ## Interface: 30300
 ## Title: Ascension Chat Scanner
-## Notes: Scans chat for group, PvP and trade posts and lists them in a sortable table. Content packs per realm: Conquest of Azeroth, Manastorm, Classic.
+## Notes: Scans chat for group, PvP and trade posts and lists them in a sortable table. Content packs per realm: Conquest of Azeroth, Ascension, Classic.
 ## Author: Kropackova
-## Version: 1.0
+## Version: 1.1
 ## SavedVariablesPerCharacter: ACS_DB
 
 Packs.lua
