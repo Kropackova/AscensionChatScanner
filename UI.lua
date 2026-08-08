@@ -2470,15 +2470,9 @@ local function createWindow()
 				GameTooltip:AddLine("Asking for: " .. self.data.wanted, 0.6, 0.6, 0.6)
 			end
 			GameTooltip:AddLine("Channel: " .. tostring(self.data.channel or "?"), 0.6, 0.6, 0.6)
-			local intent = AGF.IntentOf(AGF.GetMode())
-			if intent == "LFM" then
-				GameTooltip:AddLine("Aura and looms on an LFM row are what the leader asks for", 0.6, 0.6, 0.6)
-			elseif intent == "LFG" then
-				GameTooltip:AddLine("Aura and looms on an LFG row are what that player brings", 0.6, 0.6, 0.6)
-			end
 			local preview = AGF.BuildWhisper and AGF.BuildWhisper(self.data, AGF.GetMode())
 			if preview and preview ~= "" then
-				GameTooltip:AddLine("W sends: " .. preview, 0.6, 0.6, 0.6, true)
+				GameTooltip:AddLine("W sends: " .. preview, 0.45, 0.7, 1, true)
 			else
 				GameTooltip:AddLine("No whisper line for this tab yet, set one with the Whisp Templates button", 0.6, 0.6, 0.6, true)
 			end

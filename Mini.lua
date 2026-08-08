@@ -187,7 +187,7 @@ local function onRowEnter(self)
 	-- Show the whisper before it is sent, not after.
 	local preview = whisperPreview(entry)
 	if preview then
-		GameTooltip:AddLine("W sends: " .. preview, 0.7, 0.7, 0.7, true)
+		GameTooltip:AddLine("W sends: " .. preview, 0.45, 0.7, 1, true)
 	else
 		GameTooltip:AddLine("No whisper line for this tab yet, set one with"
 			.. " the Whisp Templates button", 0.7, 0.7, 0.7, true)

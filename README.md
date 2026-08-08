@@ -2,6 +2,8 @@
 
 A chat scanner for **World of Warcraft 3.3.5a**, built for **Project Ascension**. It watches every chat channel you have joined, recognises group, PvP and trade posts, and lists them in a sortable, filterable table with one-click whisper and invite from the row menu.
 
+**[Download the latest release](https://github.com/Kropackova/AscensionChatScanner/releases/latest)**
+
 ![The main window, PvE LFM tab](docs/01-main-pve-lfm.png)
 
 *The main window on the PvE LFM tab, twenty-seven posts held. Sections and tabs on the left, view controls on the right, raids and world bosses told apart from dungeons in the Activity column.*
@@ -18,7 +20,7 @@ Interface\AddOns\AscensionChatScanner-zip\AscensionChatScanner.toc  ignored
 Interface\AddOns\AscensionChatScanner-main\AscensionChatScanner.toc  ignored
 ```
 
-Download the release archive from the Releases page, the file listed under **Assets**, not "Source code (zip)". If you take the source zip, rename the extracted folder to `AscensionChatScanner` before you copy it in.
+Download the release archive from the [Releases page](https://github.com/Kropackova/AscensionChatScanner/releases/latest), the file listed under **Assets**, not "Source code (zip)". If you take the source zip, rename the extracted folder to `AscensionChatScanner` before you copy it in.
 
 ---
 
@@ -41,6 +43,7 @@ Download the release archive from the Releases page, the file listed under **Ass
 - [What the addon cannot know](#what-the-addon-cannot-know)
 - [Licence](#licence)
 - [Changelog](CHANGELOG.md)
+- [Releases](https://github.com/Kropackova/AscensionChatScanner/releases)
 
 ---
 
@@ -61,10 +64,11 @@ Download the release archive from the Releases page, the file listed under **Ass
 
 ## Installation
 
-1. Close the game.
-2. Copy the folder `AscensionChatScanner` into `Interface\AddOns`.
-3. Start the game and make sure the addon is ticked in the character screen addon list.
-4. Type `/acs`.
+1. Download the addon archive from the [Releases page](https://github.com/Kropackova/AscensionChatScanner/releases/latest), under **Assets**.
+2. Close the game.
+3. Unzip it into `Interface\AddOns`, so that the folder `AscensionChatScanner` sits there.
+4. Start the game and make sure the addon is ticked in the character screen addon list.
+5. Type `/acs`.
 
 ---
 
