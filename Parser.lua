@@ -3,7 +3,7 @@
 -- What counts as an activity comes from the active pack, see Packs.lua.
 
 AGF = AGF or {}
-AGF.VERSION = "1.1"
+AGF.VERSION = "1.2"
 
 local function trim(s)
 	s = s:gsub("^%s+", "")
@@ -27,6 +27,9 @@ function AGF.Normalize(raw)
 	-- Group progress such as 3/3, 8/10 or 14/15 becomes one token, so those
 	-- numbers are never mistaken for a level or a wanted count.
 	t = t:gsub("(%d)%s*/%s*(%d)", "%1by%2")
+	-- A decimal item level such as "68.5il" is one number, not two. Without
+	-- this the full stop became a space and the gear level was lost.
+	t = t:gsub("(%d+)%.(%d+)", "%1")
 	t = t:gsub(">", " gt ")
 	t = t:gsub("<", " lt ")
 	t = t:gsub("%+%s*(%d)", " plus%1 ")
@@ -274,6 +277,13 @@ local ROLE_WORDS = {
 		"surv", "unholy", "mage", "lock", "warlock", "rogue", "hunter",
 		"hunt", "d",
 	},
+	-- Ascension has a fourth role. "suport" outnumbers "support" in the
+	-- channel log by five to one, so the misspelling is not optional. "sup"
+	-- on its own is left out, it is a greeting far more often than a role.
+	support = {
+		"support", "supports", "suport", "suports", "supp", "supps",
+		"suppo", "supporter", "suporter", "supportu", "buffer", "buffers",
+	},
 }
 
 local ROLE_WORD_MAP = {}
@@ -293,14 +303,27 @@ local ROLE_PHRASES = {
 	{ "ranged dps", "damage" }, { "melee dps", "damage" },
 	{ "aoe dps", "damage" }, { "dps aoe", "damage" }, { "big aoe", "damage" },
 	{ "huge aoe", "damage" }, { "good aoe", "damage" }, { "big pumper", "damage" },
+	{ "sup dps", "support" }, { "dps sup", "support" },
 }
 
-local COMPACT = { t = "tank", h = "heal", d = "damage" }
-local ROLE_ORDER = { "tank", "heal", "damage" }
+-- One line that asks for everything. It fills all three roles, so a tank
+-- filter and a healer filter both find the post.
+local ANY_ROLE_PHRASES = {
+	"lf all", "lfm all", "all roles", "any role", "any roles",
+	"all welcome", "anyone welcome", "everyone welcome", "any and all",
+	-- "Keystone: Ragefire Chasm (1) need all" wants every role, and read as
+	-- nothing at all it used to leave the Role cell empty.
+	"need all", "need any", "need everyone", "need everything",
+	"all classes", "any class welcome", "need rest", "need the rest",
+}
+
+local COMPACT = { t = "tank", h = "heal", d = "damage", s = "support" }
+local ROLE_ORDER = { "tank", "heal", "damage", "support" }
 AGF.ROLE_ORDER = ROLE_ORDER
 
 -- Captions for anything a player reads. The keys stay lower case.
-AGF.ROLE_LABEL = { tank = "Tank", heal = "Healer", damage = "Damage" }
+AGF.ROLE_LABEL = { tank = "Tank", heal = "Healer", damage = "Damage",
+	support = "Support", any = "Any" }
 
 function AGF.RoleLabel(role)
 	return AGF.ROLE_LABEL[role] or role
@@ -332,7 +355,7 @@ local function roleAt(word)
 	if num and rest and ROLE_WORD_MAP[rest] then
 		return ROLE_WORD_MAP[rest]
 	end
-	if word:match("^%d[thd]") and word:gsub("%d[thd]", "") == "" then
+	if word:match("^%d[thds]") and word:gsub("%d[thds]", "") == "" then
 		return "compact"
 	end
 	return nil
@@ -422,11 +445,18 @@ function AGF.ParseRoles(t)
 			local num, rest = w:match("^(%d+)(%a+)$")
 			if num and rest and ROLE_WORD_MAP[rest] then
 				set[ROLE_WORD_MAP[rest]] = true
-			elseif w:match("^%d[thd]") and w:gsub("%d[thd]", "") == "" then
-				for _, letter in w:gmatch("(%d)([thd])") do
+			elseif w:match("^%d[thds]") and w:gsub("%d[thds]", "") == "" then
+				for _, letter in w:gmatch("(%d)([thds])") do
 					set[COMPACT[letter]] = true
 				end
 			end
+		end
+	end
+	for i = 1, #ANY_ROLE_PHRASES do
+		if has(t, ANY_ROLE_PHRASES[i]) then
+			set.tank, set.heal, set.damage = true, true, true
+			set.support = true
+			set.any = true
 		end
 	end
 	return set
@@ -435,6 +465,10 @@ end
 function AGF.RoleText(set)
 	if not set then
 		return "?"
+	end
+	-- Every role at once reads better as one word than as a list of three.
+	if set.any then
+		return "any"
 	end
 	local out = {}
 	for i = 1, #ROLE_ORDER do
@@ -873,6 +907,17 @@ local ILVL_MAX = 600
 
 -- Published so the cell editor accepts exactly what the parser accepts.
 AGF.LEVEL_CAP = LEVEL_CAP
+
+-- The cap is 60 on the vanilla realms and 70 on Area 52. Packs.lua calls this
+-- the moment it picks a pack, which happens before the first message arrives.
+function AGF.SetLevelCap(value)
+	value = tonumber(value)
+	if not value or value < 10 or value > 255 then
+		return
+	end
+	LEVEL_CAP = value
+	AGF.LEVEL_CAP = value
+end
 AGF.ILVL_MAX = ILVL_MAX
 
 local LEVEL_PATTERNS = {
@@ -999,6 +1044,36 @@ function AGF.MarkIlvl(t)
 			return " ilv" .. n .. " " .. stem .. " "
 		end)
 	end
+	-- "i72". A one letter stem is only trusted well above the level cap,
+	-- because "i 2" is far more often "invite 2" than an item level.
+	t = t:gsub(" i(%d+) ", function(n)
+		local v = tonumber(n)
+		if v and v > LEVEL_CAP and v <= ILVL_MAX then
+			keep(n)
+			return " ilv" .. n .. " ilvl "
+		end
+		return " i" .. n .. " "
+	end)
+	-- "68+" arrives from the normaliser as "68 plus". Above the level cap it
+	-- can only be gear, at or below it it is a level range and stays put.
+	t = t:gsub(" (%d+) plus ", function(n)
+		local v = tonumber(n)
+		if v and v > LEVEL_CAP and v <= ILVL_MAX then
+			keep(n)
+			return " ilv" .. n .. " ilvl "
+		end
+		return " " .. n .. " plus "
+	end)
+	-- "+64" arrives from the normaliser as "plus64". Written in front it means
+	-- what "64+" means behind: a gear floor, never a keystone level.
+	t = t:gsub(" plus(%d+) ", function(n)
+		local v = tonumber(n)
+		if v and v > LEVEL_CAP and v <= ILVL_MAX then
+			keep(n)
+			return " ilv" .. n .. " ilvl "
+		end
+		return " plus" .. n .. " "
+	end)
 	return t, found
 end
 
@@ -1029,6 +1104,96 @@ function AGF.BareIlvl(t, isTrade)
 	end
 	return nil
 end
+
+-- Difficulty. Raids and world bosses on this realm run Normal, Heroic, Mythic
+-- and Ascended, so the tag earns its own column. A keystone settles it before
+-- any word does: a key is Mythic by definition.
+-- Levelling traffic. A character at the cap earns no experience, so a post
+-- that sells experience is a levelling group whatever level it names, or none.
+-- "UBRS XP farm" and "dungeon spam got xp" are the wording in the logs.
+local XP_WORDS = { "xp", "xps", "exp", "exps", "experience", "leveling",
+	"levelling", "lvling", "lvlup", "powerlevel", "powerleveling" }
+local XP_PHRASES = {
+	"xp farm", "exp farm", "xp farming", "exp farming", "xp spam",
+	"exp spam", "xp grind", "exp grind", "xp run", "exp run",
+	"got xp", "for xp", "need xp", "want xp", "xp boost", "boost xp",
+	"power level", "power leveling", "power levelling", "level up",
+	"lvl up", "dungeon leveling", "dungeon levelling",
+}
+
+-- Boosting. "LFM UBRS BOOST 60 TANK CARRY SUPER RUN EZ" sells experience
+-- without ever saying xp. The words on their own are not proof: a keystone
+-- group says carry too, and a sold boost belongs to Trade, so the caller
+-- asks about these only for a non mythic group post.
+local BOOST_WORDS = { "boost", "boosts", "boosting", "boosted", "boostin",
+	"carry", "carries", "carrying", "carried", "plvl", "plevel" }
+local BOOST_PHRASES = { "boost run", "boost runs", "carry run", "carry runs",
+	"boost group", "carry group" }
+
+function AGF.ParseBoost(t)
+	if not (t and AGF.Has) then
+		return false
+	end
+	for i = 1, #BOOST_PHRASES do
+		if AGF.Has(t, BOOST_PHRASES[i]) then
+			return true
+		end
+	end
+	for i = 1, #BOOST_WORDS do
+		if AGF.Has(t, BOOST_WORDS[i]) then
+			return true
+		end
+	end
+	return false
+end
+
+function AGF.ParseLevelling(t)
+	if not (t and AGF.Has) then
+		return false
+	end
+	for i = 1, #XP_PHRASES do
+		if AGF.Has(t, XP_PHRASES[i]) then
+			return true
+		end
+	end
+	for i = 1, #XP_WORDS do
+		if AGF.Has(t, XP_WORDS[i]) then
+			return true
+		end
+	end
+	return false
+end
+
+local DIFF_WORDS = {
+	{ " ascended ", "Ascended" },
+	{ " ascendant ", "Ascended" },
+	{ " asc ", "Ascended" },
+	{ " mythic ", "Mythic" },
+	{ " myth ", "Mythic" },
+	{ " heroic ", "Heroic" },
+	{ " hc ", "Heroic" },
+	{ " hcs ", "Heroic" },
+	{ " normal ", "Normal" },
+	{ " norm ", "Normal" },
+	{ " nm ", "Normal" },
+}
+
+function AGF.ParseDifficulty(t, mythicLevel)
+	if mythicLevel then
+		return "Mythic"
+	end
+	if not t then
+		return nil
+	end
+	for i = 1, #DIFF_WORDS do
+		if t:find(DIFF_WORDS[i][1], 1, true) then
+			return DIFF_WORDS[i][2]
+		end
+	end
+	return nil
+end
+
+AGF.DIFF_ORDER = { "Normal", "Heroic", "Mythic", "Ascended" }
 
 -- Raid progress. Normalisation already folded 15/25 into 15by25. A total of
 -- ten or more also settles the group size, which is how tours advertise it.
@@ -1157,6 +1322,16 @@ local NOT_A_LEVEL = {
 	x = true, got = true, have = true, spots = true, spot = true,
 }
 
+-- A word straight behind the number turns it back into a head count:
+-- "mythic 2 dps" wants two damage dealers, not a key level of two.
+local COUNTED_BY = {
+	dps = true, dd = true, dds = true, dd_s = true, tank = true,
+	tanks = true, heal = true, heals = true, healer = true, healers = true,
+	healz = true, healz_ = true, more = true, ppl = true, people = true,
+	players = true, player = true, spots = true, spot = true, man = true,
+	mans = true, spec = true, specs = true,
+}
+
 local MYTHIC_TIERS = { m0 = 0, m1 = 1, m2 = 2, m3 = 3 }
 
 -- True when the post is about a mythic run, with the keystone level whenever
@@ -1182,6 +1357,32 @@ function AGF.MatchMythic(t)
 	if plus then
 		isMythic = true
 		level = tonumber(plus)
+	end
+
+	-- "mythic 10" and "mythic key 10" write the level as a plain number behind
+	-- the word. Two digits at most, and the head count words in front are
+	-- ruled out further down the same way the keystone line does it.
+	if not level then
+		local after = clean:match("mythics? key (%d%d?)")
+			or clean:match("mythics? (%d%d?)")
+		local n = tonumber(after or "")
+		if n and n >= 0 and n <= 99 then
+			isMythic = true
+			level = n
+		end
+	end
+
+	-- "M8+", "m12" and "lfg m8" name the keystone level without the word
+	-- anywhere near it. The tiers above cover m0 to m3, this covers the rest of
+	-- the ladder. Two digits at most, so a date or an item count is never read
+	-- as a keystone.
+	if not level then
+		local bare = clean:match(" m(%d%d?) ") or clean:match(" m(%d%d?)$")
+		local n = tonumber(bare or "")
+		if n and n >= 0 and n <= 99 then
+			isMythic = true
+			level = n
+		end
 	end
 
 	-- "LF +5 MYTHIC KEY GROUP" puts the plus in front of the wording instead of
@@ -1210,6 +1411,17 @@ function AGF.MatchMythic(t)
 					end
 				end
 			end
+		end
+	end
+
+	-- "1 healer for mythic 10" and "mythic 8 lfm" write the level with no plus
+	-- and no brackets. The number straight behind the word is the level unless
+	-- the word behind that shows it counts players.
+	if not level then
+		local num, after = clean:match("mythics? (%d+) ?(%a*)")
+		local n = tonumber(num or "")
+		if n and n >= 1 and n <= 40 and not COUNTED_BY[after or ""] then
+			level = n
 		end
 	end
 
@@ -1390,10 +1602,11 @@ function AGF.Parse(raw)
 		if subBucket then
 			route = "PVP"
 		end
-	elseif actId == "GUILD" and AGF.IsPvPContext(t) then
-		-- A PvP guild recruiting is still guild recruitment, so it keeps the
-		-- Guild activity. Only the tab changes.
-		route = "PVP"
+	elseif actId == "GUILD" then
+		-- Guild recruitment is its own section. A guild that recruits for PvP
+		-- or for raids is still a guild, so there is nothing to route by
+		-- content and nothing worth splitting by intent.
+		route = "GUILD"
 		subBucket = "GUILD"
 	end
 
@@ -1439,18 +1652,48 @@ function AGF.Parse(raw)
 	end
 
 	-- Talking about content is not looking for it.
+	-- Opinions about content, classes and balance are the bulk of what a global
+	-- channel carries. None of it is an advert.
 	local CHATTER = { "tbh", "imo", "imho", "no point", "i think", "i guess",
-		"does anyone know", "anyone know", "why is", "what is", "how do" }
+		"does anyone know", "anyone know", "why is", "what is", "how do",
+		"is tier", "tier s", "tier a", "better than", "is better",
+		"is worse", "is trash", "is garbage", "any good", "worth it",
+		"nerfed", "buffed", "after the buff", "after the nerf", "sucks",
+		"suks", "the meta", "in my opinion", "i agree", "i disagree",
+		"skill issue", "you should", "they should",
+		-- Trade chat argues about prices and warns about people as much as it
+		-- sells. None of that is an offer.
+		"scam", "scammer", "scamming", "scammed", "flipper", "flipping",
+		"dont buy from", "do not buy from", "dont get underpaid",
+		"overprice", "overpriced", "underpaid", "check other buyers",
+		"doesnt mean", "does not mean", "dont get" }
+	-- Anything here means the line still asks for something, so opinion
+	-- wording only downgrades it instead of dropping it.
+	-- Trade verbs such as "selling" are deliberately not here. Warning other
+	-- players off a seller uses the same words as selling does, and this list
+	-- only decides whether a line that already reads as opinion is kept.
+	local INVITE_MARKERS = { "lf", "inv", "invite", "invites", "pst", "pm",
+		"whisper", "w me", "msg me", "dm", "join", "joining", "need",
+		"looking for", "wts", "wtb", "wtt", "recruiting", "recruit",
+		"apply", "spot", "spots", "summon", "summons", "port", "boost",
+		"boosting", "carry" }
 	if not has(t, "lfm") and not has(t, "lfg") and not AGF.RecruitCount(t)
 		and not hasAny(t, LFG_STRONG) then
 		if hasAny(t, CHATTER) then
 			intent = "UNSURE"
+			-- Nothing in the line asks for anything at all. An opinion about a
+			-- class, a boss or the meta is not an advert, so it is dropped
+			-- rather than parked in Unsure, where it only pads the tab.
+			if not hasAny(t, INVITE_MARKERS) then
+				return nil
+			end
 		end
 	end
 
 	-- Asking whether anyone runs a thing is asking to join it.
 	if not has(t, "lfm") and not AGF.RecruitCount(t) then
-		if t:find("any group") or t:find("anyone doing") or t:find("anyone running")
+		if t:find("any group") or t:find("any .- group ")
+			or t:find("anyone doing") or t:find("anyone running")
 			or t:find("any .- spam run") or t:find("any run") or t:find("spammer")
 			or t:find("any .- tour") or t:find("can i join")
 			or t:find("looking to join") then
@@ -1532,13 +1775,35 @@ function AGF.Parse(raw)
 
 	local count = AGF.RecruitCount(t)
 	local level, bracket = AGF.ParseLevel(t, count ~= nil)
+	-- A keystone run is level cap content, always. Whatever number the line
+	-- carries is the key, the dungeon wing or the group size, never the level
+	-- of a character, so a mythic row never keeps a level at all.
+	if kind == "MYTHIC" or mythicLevel or has(t, "keystone")
+		or has(t, "keystones") then
+		level, bracket = nil, false
+	end
 	if not ilvl then
 		ilvl = AGF.BareIlvl(t, route == "TRADE")
 	end
 	local roleSet = AGF.ParseRoles(t)
+	-- A leader who names no role wants anyone: "Keystone: Zul'Farrak (1) LFM".
+	-- Only for a recruit post. A player looking for a group who names no role
+	-- has said nothing about what they play, so that stays unknown.
+	if intent == "LFM" and route ~= "TRADE" and not next(roleSet) then
+		roleSet.tank, roleSet.heal, roleSet.damage = true, true, true
+		roleSet.any = true
+	end
 	local classText, classSet = AGF.ParseClass(t)
 	local aura, looms, auraState, loomsState = AGF.ParseAuraLooms(t)
 	local prog, progSize = AGF.ParseProgress(t)
+	local levelling = AGF.ParseLevelling(t)
+	-- A boost run is a levelling group even when it never says xp. A keystone
+	-- group that asks for a carry is not, and a sold boost sits in Trade, so
+	-- both are left alone.
+	if not levelling and route ~= "TRADE" and kind ~= "MYTHIC"
+		and not mythicLevel and AGF.ParseBoost(t) then
+		levelling = true
+	end
 	return {
 		intent = intent,
 		kind = kind,
@@ -1547,6 +1812,8 @@ function AGF.Parse(raw)
 		activityName = actName,
 		activityShort = actShort,
 		mythicLevel = mythicLevel,
+		difficulty = AGF.ParseDifficulty(t, mythicLevel),
+		levelling = levelling,
 		profession = profession,
 		profMode = profMode,
 		route = route,

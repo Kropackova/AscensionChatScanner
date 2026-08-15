@@ -59,6 +59,7 @@ local ALL_COLS = {
 	role    = { key = "role",    label = "Role",     w = 104, edit = true },
 	class   = { key = "class",   label = "Class",    w = 84 },
 	act     = { key = "act",     label = "Activity", w = 132 },
+	diff    = { key = "diff",    label = "Difficulty", w = 84, edit = true },
 	aura    = { key = "aura",    label = "Aura",     w = 66,  edit = true },
 	looms   = { key = "looms",   label = "Looms",    w = 72,  edit = true },
 	ilvl    = { key = "ilvl",    label = "iLvl",     w = 44, edit = true },
@@ -76,8 +77,8 @@ local function buildCols()
 	-- Every section draws from one superset. Which of these are visible is
 	-- decided per section inside layout(), so a section change needs no
 	-- reload.
-	local order = { "time", "name", "role", "class", "act", "aura", "looms",
-		"ilvl", "prog", "level", "wsp", "message" }
+	local order = { "time", "name", "role", "class", "act", "diff", "aura",
+		"looms", "ilvl", "prog", "level", "wsp", "message" }
 
 	for i = #COLS, 1, -1 do
 		COLS[i] = nil
@@ -221,21 +222,13 @@ function AGF.ApplyPackColumns()
 	buildCols()
 end
 
--- The bottom hint sits left of the resize grip. A short window has no room for
--- it, so the text is shortened and then dropped instead of running under the
--- buttons.
+-- The bottom hint is gone. The fontstring stays so the anchors around the
+-- resize grip do not have to be redone, it simply never carries text.
 local function updateHint()
 	if not frame or not frame.hint then
 		return
 	end
-	local w = frame:GetWidth() or 0
-	if w < 660 then
-		frame.hint:SetText("")
-	elseif w < 900 then
-		frame.hint:SetText("Left click to edit - right click a row for actions")
-	else
-		frame.hint:SetText("Left click a value to edit - W sends your whisper - right click a row for actions")
-	end
+	frame.hint:SetText("")
 end
 
 local visibleRows = 15
@@ -437,19 +430,22 @@ end
 
 -- Columns are dropped from this list, first to last, until the remaining
 -- columns fit the width of the table. Time, Name, W and Message always stay.
-local COL_DROP_ORDER = { "prog", "looms", "aura", "ilvl", "level", "class",
-	"act", "role" }
+local COL_DROP_ORDER = { "prog", "looms", "diff", "aura", "ilvl", "level",
+	"class", "act", "role" }
 local MIN_MESSAGE_W = 120
 
 -- The columns each section uses. Trade has no role and no level, a seller
 -- has neither.
 local SECTION_COLS = {
 	PVE = { time = true, name = true, role = true, class = true, act = true,
-		aura = true, looms = true, ilvl = true, prog = true, level = true,
-		wsp = true, message = true },
+		diff = true, aura = true, looms = true, ilvl = true, prog = true,
+		level = true, wsp = true, message = true },
 	PVP = { time = true, name = true, role = true, class = true, act = true,
 		ilvl = true, level = true, wsp = true, message = true },
 	TRADE = { time = true, name = true, act = true, wsp = true, message = true },
+	-- A guild advert is a name and a pitch. There is no role, no level and no
+	-- place to show.
+	GUILD = { time = true, name = true, message = true },
 }
 
 -- True on a realm where characters have a class. Classless realms never show
@@ -562,12 +558,139 @@ function AGF.LayoutEdges()
 	end
 end
 
+-- Column widths the user dragged in the header row. Kept per section and per
+-- character, so a wide PvE table does not force the same widths on Trade.
+local MAX_COL_W = 500
+
+local function widthStore(create)
+	local section = (AGF.GetSection and AGF.GetSection()) or "PVE"
+	if not ACS_DB then
+		return nil
+	end
+	if type(ACS_DB.colw) ~= "table" then
+		if not create then
+			return nil
+		end
+		ACS_DB.colw = {}
+	end
+	if type(ACS_DB.colw[section]) ~= "table" then
+		if not create then
+			return nil
+		end
+		ACS_DB.colw[section] = {}
+	end
+	return ACS_DB.colw[section]
+end
+
+-- A column can be dragged down to 15 px. Nothing is held up by the heading,
+-- because the heading and the cells are both cut to the width they get.
+local function colMinWidth(i)
+	return 15
+end
+
+-- Clipping without an ellipsis.
+--
+-- The client cuts a FontString that carries a width of its own and writes
+-- "..." behind it, and "Myth..." says less than "Myth". Measuring on the real
+-- FontString would mean writing the long text first and the short one after,
+-- which is what made the dots flash up and disappear again. So nothing is ever
+-- measured on screen: one hidden FontString does the measuring, and the cell
+-- is written exactly once, already short enough that the client has no reason
+-- to cut anything.
+local measureFS
+local function measureWidth(fs, text)
+	if not measureFS then
+		measureFS = UIParent:CreateFontString(nil, "BACKGROUND", "GameFontNormalSmall")
+		measureFS:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 100)
+		measureFS:Hide()
+	end
+	local file, size, flags = fs:GetFont()
+	if file then
+		measureFS:SetFont(file, size, flags)
+	end
+	measureFS:SetText(text or "")
+	return measureFS:GetStringWidth() or 0
+end
+
+-- Longest leading part of the text that fits, found by halving rather than one
+-- character at a time, because this runs for every cell of every row.
+local function clipText(fs, text, width)
+	text = text or ""
+	if not width or width <= 0 or text == "" then
+		return text
+	end
+	local room = width - 2
+	if room < 1 then
+		return ""
+	end
+	if measureWidth(fs, text) <= room then
+		return text
+	end
+	local lo, hi = 0, string.len(text)
+	while lo < hi do
+		local mid = math.floor((lo + hi + 1) / 2)
+		if measureWidth(fs, string.sub(text, 1, mid)) <= room then
+			lo = mid
+		else
+			hi = mid - 1
+		end
+	end
+	return string.sub(text, 1, lo)
+end
+
+-- Writes the text already cut, and remembers the whole of it, so widening the
+-- column brings the rest back instead of cutting a stump down again.
+local function setClipped(fs, text, width)
+	if not fs then
+		return
+	end
+	fs.fullText = text or ""
+	fs:SetText(clipText(fs, fs.fullText, width))
+end
+
+-- Re-cut what is already on a FontString, after its column changed width.
+local function reclip(fs, width)
+	if not fs then
+		return
+	end
+	local full = fs.fullText or fs:GetText() or ""
+	fs.fullText = full
+	fs:SetText(clipText(fs, full, width))
+end
+
+function AGF.ResetColumnWidths()
+	if ACS_DB then
+		ACS_DB.colw = {}
+	end
+end
+
 local function layout()
 	if not frame then
 		return
 	end
 	AGF.LayoutEdges()
 	local avail = frame:GetWidth() - AGF.EdgeMargin() * 2 - SCROLL_W
+
+	-- A dragged width wins over the built in one. Everything below measures
+	-- from c.w, so this is the only place that has to know about it.
+	local saved = widthStore(false)
+	for i = 1, #COLS do
+		local c = COLS[i]
+		local def = ALL_COLS[c.key]
+		local w = (def and def.w) or c.w
+		local override = saved and tonumber(saved[c.key])
+		if override then
+			local min = colMinWidth(i)
+			if override < min then
+				override = min
+			end
+			if override > MAX_COL_W then
+				override = MAX_COL_W
+			end
+			w = override
+		end
+		c.w = w
+	end
 
 	-- Step 1. Find the columns that fit. A column that does not fit is hidden.
 	-- Columns are measured, not drawn at fixed offsets, so the last
@@ -646,7 +769,22 @@ local function layout()
 			h:SetPoint("TOPLEFT", headerBar, "TOPLEFT", COLS[i].x, 0)
 			h:SetWidth(COLS[i].cw)
 			h:SetHeight(18)
+			-- The label sits 2 px in from the left edge.
+			reclip(h.label, COLS[i].cw - 2)
 			h:Show()
+		end
+		-- The drag handle sits on the right edge of its heading. Message is
+		-- the flex column and takes whatever is left, so it has no handle.
+		local grip = h and h.widthGrip
+		if grip then
+			if hiddenCols[COLS[i].key] or COLS[i].flex then
+				grip:Hide()
+			else
+				grip:ClearAllPoints()
+				grip:SetPoint("TOPLEFT", headerBar, "TOPLEFT",
+					COLS[i].x + COLS[i].cw - 3, 0)
+				grip:Show()
+			end
 		end
 	end
 
@@ -664,6 +802,9 @@ local function layout()
 					cell:ClearAllPoints()
 					cell:SetPoint("LEFT", row, "LEFT", COLS[j].x, 0)
 					cell:SetWidth(COLS[j].cw)
+					if COLS[j].key ~= "message" then
+						reclip(cell, COLS[j].cw)
+					end
 					cell:Show()
 				end
 			end
@@ -700,6 +841,21 @@ local function levelText(data)
 		return tostring(data.level) .. "+"
 	end
 	return tostring(data.level)
+end
+
+-- Cut every cell to its column once the row is painted, so each branch above
+-- can go on writing the full value. Message is the flex column and keeps the
+-- client behaviour, ellipsis and all.
+local function clipRowCells(cells)
+	for i = 1, #COLS do
+		local c = COLS[i]
+		if c.key ~= "message" and not hiddenCols[c.key] then
+			local cell = cells[c.key]
+			if cell then
+				setClipped(cell, cell:GetText(), c.cw or c.w)
+			end
+		end
+	end
 end
 
 local function paintRow(row, data, index)
@@ -763,6 +919,23 @@ local function paintRow(row, data, index)
 		cells.act:SetText(text)
 		cells.act:SetTextColor(0.68, 0.84, 1)
 	end
+	-- Difficulty gets its own column, because a raid at Heroic and the same
+	-- raid at Ascended are two different evenings.
+	if cells.diff then
+		local d = data.difficulty
+		cells.diff:SetText(d or "-")
+		if d == "Ascended" then
+			cells.diff:SetTextColor(1, 0.5, 0.25)
+		elseif d == "Mythic" then
+			cells.diff:SetTextColor(0.85, 0.45, 0.95)
+		elseif d == "Heroic" then
+			cells.diff:SetTextColor(0.4, 0.7, 1)
+		elseif d == "Normal" then
+			cells.diff:SetTextColor(0.82, 0.82, 0.82)
+		else
+			cells.diff:SetTextColor(0.5, 0.5, 0.5)
+		end
+	end
 	if cells.ilvl then
 		if levelEdit and levelEdit:IsShown() and levelEdit.cell == cells.ilvl then
 			cells.ilvl:SetText("")
@@ -817,6 +990,7 @@ local function paintRow(row, data, index)
 	else
 		row.bg:SetTexture(1, 1, 1, alt * 0.35)
 	end
+	clipRowCells(cells)
 	row.bg:Show()
 	row:Show()
 end
@@ -853,7 +1027,9 @@ local function updateRows()
 			else
 				row.data = nil
 				for j = 1, #COLS do
-					row.cells[COLS[j].key]:SetText("")
+					local cell = row.cells[COLS[j].key]
+					cell.fullText = ""
+					cell:SetText("")
 				end
 				row.bg:Hide()
 			end
@@ -907,9 +1083,9 @@ function AGF.Refresh()
 	for i = 1, #COLS do
 		local key = COLS[i].key
 		if key == "aura" then
-			headers[i].label:SetText("Aura")
+			setClipped(headers[i].label, "Aura", (COLS[i].cw or COLS[i].w) - 2)
 		elseif key == "looms" then
-			headers[i].label:SetText("Looms")
+			setClipped(headers[i].label, "Looms", (COLS[i].cw or COLS[i].w) - 2)
 		end
 	end
 	countText:SetText(#currentList .. " of " .. #(ACS_DB.rows[mode] or {})
@@ -1259,6 +1435,40 @@ local function cycleYesNo(data, key)
 	end)
 end
 
+-- The Diff cell steps through the difficulties that make sense for the row
+-- itself: dungeons stop at Mythic, raids and world bosses reach Ascended. The
+-- step after the last one puts back what the message said, the same way the
+-- Role and yes/no cells behave. A row that has no difficulty at all, a trade
+-- or PvP line, does nothing.
+local function cycleDiff(data)
+	local cat = AGF.CategoryForKind and AGF.CategoryForKind(data.kind)
+	local choices = (cat and AGF.DifficultyChoices
+		and AGF.DifficultyChoices(cat.id)) or {}
+	if #choices == 0 then
+		return
+	end
+	data.locked = data.locked or {}
+	data.orig = data.orig or {}
+	if data.orig.difficulty == nil then
+		data.orig.difficulty = data.difficulty or false
+	end
+	local at = 0
+	for i = 1, #choices do
+		if choices[i] == data.difficulty then
+			at = i
+			break
+		end
+	end
+	if at + 1 > #choices then
+		local orig = data.orig.difficulty
+		data.difficulty = (orig ~= false) and orig or nil
+		data.locked.diff = nil
+	else
+		data.difficulty = choices[at + 1]
+		data.locked.diff = true
+	end
+end
+
 local function columnAt(row)
 	local scale = row:GetEffectiveScale()
 	local cursorX = GetCursorPosition() / scale
@@ -1309,6 +1519,8 @@ local function onRowClick(row, button)
 		cycleYesNo(data, "aura")
 	elseif col.key == "looms" then
 		cycleYesNo(data, "looms")
+	elseif col.key == "diff" then
+		cycleDiff(data)
 	elseif col.key == "level" then
 		openCellEditor(row, row.cells.level, "level")
 		return
@@ -1424,8 +1636,8 @@ local function createWhisperPanel()
 	tokens:SetWidth(420)
 	tokens:SetJustifyH("LEFT")
 	tokens:SetText("Placeholders, filled in when you click: {name} {role} {level}"
-		.. " {aura} {looms} {size} read from the post, {myname} {mylevel} for"
-		.. " you, {prof} {profmode} on profession rows.")
+		.. " {aura} {looms} {size} {theirilvl} read from the post, {myname}"
+		.. " {mylevel} {ilvl} for you, {prof} {profmode} on profession rows.")
 
 	-- Height follows the number of slots, so nothing can overlap again.
 	whisperPanel:SetHeight(-y + 116)
@@ -1488,6 +1700,76 @@ end
 
 -- Filters panel -------------------------------------------------------------
 
+-- The three menu buttons in the corner of the window. A full screen catcher
+-- covers them while a menu is open, which is why both the hover highlight and
+-- the click have to be driven by hand from here.
+local function menuButtons()
+	return { filtersButton, rowsButton, skinsButton }
+end
+
+local function menuButtonUnderCursor(skip)
+	local buttons = menuButtons()
+	for i = 1, #buttons do
+		local b = buttons[i]
+		if b and b ~= skip and b:IsShown() then
+			local over = false
+			if MouseIsOver then
+				over = MouseIsOver(b)
+			elseif b.IsMouseOver then
+				over = b:IsMouseOver()
+			end
+			if over then
+				return b
+			end
+		end
+	end
+	return nil
+end
+
+-- The catcher takes the mouse, so the button underneath never gets OnEnter and
+-- never lights up. The highlight is locked on by hand instead, from the same
+-- cursor test the click forwarding uses.
+local function clearMenuHover()
+	local buttons = menuButtons()
+	for i = 1, #buttons do
+		if buttons[i] then
+			buttons[i]:UnlockHighlight()
+		end
+	end
+end
+
+local function paintMenuHover()
+	local hot = menuButtonUnderCursor()
+	local buttons = menuButtons()
+	for i = 1, #buttons do
+		local b = buttons[i]
+		if b then
+			if b == hot then
+				b:LockHighlight()
+			else
+				b:UnlockHighlight()
+			end
+		end
+	end
+	return hot
+end
+
+-- Clicking one menu button while another menu is open should switch straight
+-- to it. The catcher swallows that click, so after closing what was open it is
+-- handed to the button the cursor is actually over.
+local function forwardMenuClick(skip)
+	clearMenuHover()
+	local b = menuButtonUnderCursor(skip)
+	if not b then
+		return false
+	end
+	local script = b:GetScript("OnClick")
+	if script then
+		script(b, "LeftButton")
+	end
+	return true
+end
+
 local function closeFilterPanel()
 	-- The activity dropdown is parented to UIParent, so it survives the
 	-- panel unless it is closed by hand.
@@ -1498,8 +1780,8 @@ end
 
 local function makeCheck(parent, label, x, y, onClick)
 	local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-	check:SetWidth(22)
-	check:SetHeight(22)
+	check:SetWidth(16)
+	check:SetHeight(16)
 	check:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
 	local text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	text:SetPoint("LEFT", check, "RIGHT", 2, 0)
@@ -1518,7 +1800,22 @@ local function createFilterPanel()
 	clickCatcher:SetAllPoints(UIParent)
 	clickCatcher:SetFrameStrata("FULLSCREEN")
 	clickCatcher:EnableMouse(true)
-	clickCatcher:SetScript("OnMouseDown", closeFilterPanel)
+	clickCatcher:SetScript("OnMouseDown", function()
+		closeFilterPanel()
+		-- A click that landed on Rows or Skins opens that menu right away.
+		forwardMenuClick(filtersButton)
+	end)
+	-- Hover highlight for the buttons the catcher covers. Twenty times a second
+	-- is more than enough and costs nothing measurable.
+	clickCatcher:SetScript("OnUpdate", function(self, elapsed)
+		self.hoverAt = (self.hoverAt or 0) + (elapsed or 0)
+		if self.hoverAt < 0.05 then
+			return
+		end
+		self.hoverAt = 0
+		paintMenuHover()
+	end)
+	clickCatcher:SetScript("OnHide", clearMenuHover)
 	clickCatcher:Hide()
 
 	filterPanel = CreateFrame("Frame", "AGF_FilterPanel", UIParent)
@@ -1532,6 +1829,13 @@ local function createFilterPanel()
 		insets = { left = 8, right = 8, top = 8, bottom = 8 },
 	})
 	filterPanel:EnableMouse(true)
+	-- A click on the panel itself closes the activity menu, which now floats
+	-- above the panel and would otherwise stay open behind your next click.
+	filterPanel:SetScript("OnMouseDown", function()
+		if AGF.HideKindPicker then
+			AGF.HideKindPicker()
+		end
+	end)
 
 	-- Solid backing so nothing underneath shows through the panel.
 	local solid = filterPanel:CreateTexture(nil, "BORDER")
@@ -1556,7 +1860,33 @@ local function createFilterPanel()
 	end
 	local GROUPS = { PVE = true, PVP = true }
 	local EVERY = { PVE = true, PVP = true, TRADE = true }
+	-- Guild has one list and no activities, so the word box is the only
+	-- filter it shows.
+	local ALL_TABS = { PVE = true, PVP = true, TRADE = true, GUILD = true }
 	local PVE_ONLY = { PVE = true }
+
+	-- Difficulty belongs to dungeons and raids, and the keystone window only to
+	-- a mythic dungeon, so both stay out of the panel until the Activity filter
+	-- asks for them. A hidden widget never keeps a value, see pickKind.
+	local function diffShown()
+		local f = ACS_DB and ACS_DB.filter
+		return (f and AGF.CategoryHasDifficulty(f.kind)) or false
+	end
+	local function keyShown()
+		local f = ACS_DB and ACS_DB.filter
+		return (f and f.kind == "CAT_DGN"
+			and (f.difficulty or "ALL") == "Mythic") or false
+	end
+
+	-- A blank spacer. Headings sit tight above the widget they name, and the
+	-- air between groups goes here, above the heading. A spacer hides with
+	-- the same rules as the item it precedes, so no gap is left behind.
+	local function gap(height, sections, when)
+		local f = CreateFrame("Frame", nil, p)
+		f:SetWidth(1)
+		f:SetHeight(1)
+		return item(f, sections, height, 0, when)
+	end
 
 	p.roleChecks = {}
 	for i = 1, #AGF.ROLE_ORDER do
@@ -1564,20 +1894,27 @@ local function createFilterPanel()
 		p.roleChecks[role] = makeCheck(p, AGF.RoleLabel(role), 14, 0, function(value)
 			ACS_DB.filter.roles[role] = value
 		end)
-		item(p.roleChecks[role], GROUPS, 24, 14)
+		item(p.roleChecks[role], GROUPS, 15, 13)
 	end
 	p.auraCheck = makeCheck(p, "Aura", 14, 0, function(value)
 		ACS_DB.filter.needAura = value
 	end)
-	item(p.auraCheck, PVE_ONLY, 24, 14)
+	item(p.auraCheck, PVE_ONLY, 15, 13)
 	p.loomsCheck = makeCheck(p, "Looms", 14, 0, function(value)
 		ACS_DB.filter.needLooms = value
 	end)
-	item(p.loomsCheck, PVE_ONLY, 24, 14)
+	item(p.loomsCheck, PVE_ONLY, 15, 13)
+	-- Level 60 mode. Hides the levelling traffic, which is the only kind that
+	-- names a level below the cap, an aura or a set of heirlooms.
+	p.maxOnlyCheck = makeCheck(p, "Level " .. (AGF.LEVEL_CAP or 60)
+		.. " only", 14, 0, function(value)
+		ACS_DB.filter.maxOnly = value
+	end)
 
+	gap(4, EVERY)
 	p.intentLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	p.intentLabel:SetText("I am looking for")
-	item(p.intentLabel, EVERY, 22, 16)
+	item(p.intentLabel, EVERY, 13, 14)
 
 	p.intentChecks = {}
 	local INTENTS = { "GROUP", "PLAYERS", "BOTH" }
@@ -1587,12 +1924,13 @@ local function createFilterPanel()
 			AGF.SetFilterIntent(value)
 			AGF.RefreshFilterPanel()
 		end)
-		item(p.intentChecks[value], EVERY, 22, 14)
+		item(p.intentChecks[value], EVERY, 15, 13)
 	end
 
+	gap(4, GROUPS)
 	p.levelLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	p.levelLabel:SetText("Level from / to, 0 = any")
-	item(p.levelLabel, GROUPS, 20, 16)
+	item(p.levelLabel, GROUPS, 12, 14)
 
 	p.minLevel = CreateFrame("EditBox", "AGF_MinLevel", p, "InputBoxTemplate")
 	p.minLevel:SetWidth(38)
@@ -1600,7 +1938,7 @@ local function createFilterPanel()
 	p.minLevel:SetAutoFocus(false)
 	p.minLevel:SetNumeric(true)
 	p.minLevel:SetMaxLetters(2)
-	item(p.minLevel, GROUPS, 28, 20)
+	item(p.minLevel, GROUPS, 20, 18)
 
 	p.maxLevel = CreateFrame("EditBox", "AGF_MaxLevel", p, "InputBoxTemplate")
 	p.maxLevel:SetWidth(38)
@@ -1621,74 +1959,474 @@ local function createFilterPanel()
 	p.minLevel:SetScript("OnEditFocusLost", commitLevels)
 	p.maxLevel:SetScript("OnEditFocusLost", commitLevels)
 
+	gap(4, ALL_TABS)
 	p.wordLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	p.wordLabel:SetText("Message contains")
-	item(p.wordLabel, EVERY, 20, 16)
+	item(p.wordLabel, ALL_TABS, 12, 14)
 
 	p.word = CreateFrame("EditBox", "AGF_WordFilter", p, "InputBoxTemplate")
 	p.word:SetWidth(150)
 	p.word:SetHeight(18)
 	p.word:SetAutoFocus(false)
+
+	-- The list follows what you type. The rebuild is held back by a tenth of
+	-- a second, so a fast typist sorts and redraws once, not once per letter.
+	local WORD_DELAY = 0.1
+	local wordTimer = CreateFrame("Frame", nil, p)
+	wordTimer:Hide()
+	wordTimer.left = 0
+	wordTimer:SetScript("OnUpdate", function(self, elapsed)
+		self.left = self.left - (elapsed or 0)
+		if self.left > 0 then
+			return
+		end
+		self:Hide()
+		AGF.Refresh()
+	end)
+	local function typedWord(self)
+		-- RefreshFilterPanel writes the saved text back into the box. That is
+		-- not the user typing, so it must not schedule anything.
+		if p.wordSuppress then
+			return
+		end
+		ACS_DB.filter.word = self:GetText() or ""
+		wordTimer.left = WORD_DELAY
+		wordTimer:Show()
+	end
+	p.word:SetScript("OnTextChanged", typedWord)
 	p.word:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
 	p.word:SetScript("OnEditFocusLost", function(self)
+		wordTimer:Hide()
 		ACS_DB.filter.word = self:GetText() or ""
 		AGF.Refresh()
 	end)
-	item(p.word, EVERY, 30, 20)
+	item(p.word, ALL_TABS, 20, 18)
 
+	-- Level 60 mode says which posts to show, not what the poster is, so it
+	-- belongs with Activity and Difficulty and not with the role boxes.
+	gap(4, PVE_ONLY)
+	item(p.maxOnlyCheck, PVE_ONLY, 15, 13)
+
+	gap(4, EVERY)
 	p.kindLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	p.kindLabel:SetText("Activity")
-	item(p.kindLabel, EVERY, 20, 16)
+	item(p.kindLabel, EVERY, 12, 14)
 
 	-- One button that steps through the types present in this section.
 	p.kindButton = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 	p.kindButton:SetWidth(150)
 	p.kindButton:SetHeight(20)
 	p.kindButton:SetText("All activities")
-	p.kindMenu = CreateFrame("Frame", "AGFKindMenu", UIParent, "UIDropDownMenuTemplate")
-	p.kindMenu.displayMode = "MENU"
+	-- Smaller face than the other buttons: an activity plus a place name needs
+	-- every pixel of the 150 the button has.
+	p.kindButton:SetNormalFontObject(GameFontNormalSmall)
+	p.kindButton:SetHighlightFontObject(GameFontHighlightSmall)
+	p.kindButton:SetDisabledFontObject(GameFontDisableSmall)
 
-	local function pickKind(kind)
+	-- kind holds a category such as CAT_DGN, or a single activity id for the
+	-- ones that stand alone. target names one dungeon, raid or boss inside the
+	-- category, or ALL for every one of them.
+	local function pickKind(kind, target)
 		ACS_DB.filter.kind = kind
+		ACS_DB.filter.target = target or "ALL"
+		-- Difficulty and the keystone window leave the panel with the category
+		-- they belong to, and a filter nobody can see must not keep filtering.
+		if not AGF.CategoryHasDifficulty(kind) then
+			ACS_DB.filter.difficulty = "ALL"
+		end
+		if not (kind == "CAT_DGN"
+			and (ACS_DB.filter.difficulty or "ALL") == "Mythic") then
+			ACS_DB.filter.minKey = 0
+			ACS_DB.filter.maxKey = 0
+		end
 		AGF.RefreshFilterPanel()
 		AGF.Refresh()
 	end
 
-	local function initKindMenu(self, level)
-		local current = (ACS_DB and ACS_DB.filter and ACS_DB.filter.kind) or "ALL"
-		local info = UIDropDownMenu_CreateInfo()
-		info.text = "All activities"
-		info.checked = (current == "ALL")
-		info.func = function() pickKind("ALL") end
-		UIDropDownMenu_AddButton(info, level)
-		local counts = (AGF.KindCounts and AGF.KindCounts(AGF.GetSection())) or {}
-		for i = 1, #counts do
-			local c = counts[i]
-			local entry = UIDropDownMenu_CreateInfo()
-			entry.text = c.label .. "  (" .. c.count .. ")"
-			entry.checked = (current == c.kind)
-			entry.func = function() pickKind(c.kind) end
-			UIDropDownMenu_AddButton(entry, level)
+	-- The Activity menu is built from plain frames instead of Blizzard's
+	-- dropdown. That one cannot lay a long list out in two columns, gives no
+	-- way to force a submenu to open upwards, and indents rows that carry a
+	-- check mark while leaving the others flush left. All three are needed
+	-- here, so the menu is ours.
+	local MENU_ROW_H = 16
+	local MENU_PAD = 10
+	local MENU_BACKDROP = {
+		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 16, edgeSize = 16,
+		insets = { left = 5, right = 5, top = 5, bottom = 5 },
+	}
+
+	local kindPanel, placePanel, catcher
+
+	-- SetBackdrop on its own left the menu see through on this client, so the
+	-- backdrop colours are set by hand and a solid texture sits under the rows.
+	local function skinPanel(frame)
+		frame:SetBackdrop(MENU_BACKDROP)
+		frame:SetBackdropColor(0.06, 0.06, 0.08, 1)
+		frame:SetBackdropBorderColor(0.5, 0.5, 0.56, 1)
+		local solid = frame:CreateTexture(nil, "BACKGROUND")
+		solid:SetTexture(0.05, 0.05, 0.06, 1)
+		solid:SetPoint("TOPLEFT", 4, -4)
+		solid:SetPoint("BOTTOMRIGHT", -4, 4)
+	end
+
+	local function hidePicker()
+		if placePanel then placePanel:Hide() end
+		if kindPanel then kindPanel:Hide() end
+		if catcher then catcher:Hide() end
+	end
+	AGF.HideKindPicker = hidePicker
+
+	-- Rows are made once and reused, so opening the menu costs nothing after
+	-- the first time.
+	local function panelRow(panel, index)
+		panel.rows = panel.rows or {}
+		local row = panel.rows[index]
+		if not row then
+			row = CreateFrame("Button", nil, panel)
+			row:SetHeight(MENU_ROW_H)
+			row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+			local hl = row:GetHighlightTexture()
+			if hl then hl:SetBlendMode("ADD") end
+			row.text = row:CreateFontString(nil, "OVERLAY",
+				"GameFontHighlightSmall")
+			row.text:SetPoint("LEFT", row, "LEFT", 2, 0)
+			row.text:SetJustifyH("LEFT")
+			row.arrow = row:CreateFontString(nil, "OVERLAY",
+				"GameFontHighlightSmall")
+			row.arrow:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+			row:SetScript("OnEnter", function(self)
+				if self.onEnter then self.onEnter() end
+			end)
+			row:SetScript("OnClick", function(self)
+				if self.onClick then self.onClick() end
+			end)
+			panel.rows[index] = row
+		end
+		return row
+	end
+
+	-- Fills a panel with entries over the given number of equally tall columns.
+	-- The panel keeps its bottom edge, so it always grows upward.
+	local function fillPanel(panel, entries, columns, colWidth)
+		local total = #entries
+		local perCol = math.max(1, math.ceil(total / columns))
+		local used = math.max(1, math.ceil(total / perCol))
+		panel:SetWidth(used * colWidth + MENU_PAD * 2)
+		panel:SetHeight(perCol * MENU_ROW_H + MENU_PAD * 2)
+		for i = 1, total do
+			local row = panelRow(panel, i)
+			local col = math.floor((i - 1) / perCol)
+			local line = (i - 1) % perCol
+			row:SetWidth(colWidth)
+			row:ClearAllPoints()
+			row:SetPoint("TOPLEFT", panel, "TOPLEFT",
+				MENU_PAD + col * colWidth, -(MENU_PAD + line * MENU_ROW_H))
+			row.text:SetText(entries[i].text or "")
+			row.arrow:SetText(entries[i].arrow or "")
+			row.onClick = entries[i].onClick
+			row.onEnter = entries[i].onEnter
+			-- A note row is a caption, not a choice, so it takes no mouse.
+			row:EnableMouse(not entries[i].note)
+			row:Show()
+		end
+		for i = total + 1, #(panel.rows or {}) do
+			panel.rows[i]:Hide()
 		end
 	end
 
-	UIDropDownMenu_Initialize(p.kindMenu, initKindMenu, "MENU")
+	local function mark(text, current)
+		if current then
+			return "|cff40d0ff" .. text .. "|r"
+		end
+		return text
+	end
+
+	local function ensurePanels()
+		if kindPanel then
+			return
+		end
+		-- A full screen catcher behind the menu closes it on any click outside.
+		catcher = CreateFrame("Frame", nil, UIParent)
+		catcher:SetAllPoints(UIParent)
+		catcher:EnableMouse(true)
+		catcher:SetFrameStrata("FULLSCREEN")
+		catcher:Hide()
+		catcher:SetScript("OnMouseDown", function() hidePicker() end)
+
+		kindPanel = CreateFrame("Frame", "AGF_KindPicker", UIParent)
+		skinPanel(kindPanel)
+		-- Above the filter panel, which sits in FULLSCREEN_DIALOG itself. In the
+		-- same strata the menu was drawn behind the panel, which read as a menu
+		-- with no background at all.
+		kindPanel:SetFrameStrata("TOOLTIP")
+		kindPanel:SetFrameLevel(20)
+		kindPanel:EnableMouse(true)
+		kindPanel:Hide()
+		kindPanel:SetScript("OnHide", function()
+			if placePanel then placePanel:Hide() end
+			if catcher then catcher:Hide() end
+		end)
+		table.insert(UISpecialFrames, "AGF_KindPicker")
+
+		placePanel = CreateFrame("Frame", nil, kindPanel)
+		skinPanel(placePanel)
+		placePanel:SetFrameStrata("TOOLTIP")
+		placePanel:SetFrameLevel(kindPanel:GetFrameLevel() + 10)
+		placePanel:EnableMouse(true)
+		placePanel:Hide()
+	end
+
+	local function kindCounts()
+		return (AGF.KindCounts and AGF.KindCounts(AGF.GetSection())) or {}
+	end
+
+	local function countIn(counts, kind)
+		for i = 1, #counts do
+			if counts[i].kind == kind then
+				return counts[i].count
+			end
+		end
+		return 0
+	end
+
+	-- Second level: the places inside one category, Any at the top, then the
+	-- activities that stand on their own such as Random Dungeon, then the list.
+	-- Anything longer than fourteen rows goes into two columns of equal height.
+	local function openPlaces(cat)
+		ensurePanels()
+		local f = (ACS_DB and ACS_DB.filter) or {}
+		local current, target = f.kind or "ALL", f.target or "ALL"
+		local counts = kindCounts()
+		-- No Any row here. Clicking Dungeon, Raid or World Boss itself takes
+		-- the whole category, which is what Any used to do.
+		local entries = {}
+		if cat.lead then
+			for i = 1, #cat.lead do
+				local lead = cat.lead[i]
+				entries[#entries + 1] = {
+					text = mark(lead.label .. "  (" .. countIn(counts, lead.value)
+						.. ")", current == cat.id and target == lead.value),
+					onClick = function()
+						pickKind(cat.id, lead.value)
+						hidePicker()
+					end,
+				}
+			end
+		end
+		local list = (AGF.TargetsForKind and AGF.TargetsForKind(cat.targetKind))
+			or {}
+		-- How many stored posts name each place, so every row carries a count
+		-- the way the first level does.
+		local named = (AGF.TargetCounts
+			and AGF.TargetCounts(AGF.GetSection(), cat)) or {}
+		for i = 1, #list do
+			local name = list[i]
+			entries[#entries + 1] = {
+				text = mark(name .. "  (" .. (named[name] or 0) .. ")",
+					current == cat.id and target == name),
+				onClick = function()
+					pickKind(cat.id, name)
+					hidePicker()
+				end,
+			}
+		end
+		fillPanel(placePanel, entries, (#entries > 14) and 2 or 1, 196)
+		placePanel:ClearAllPoints()
+		placePanel:SetPoint("TOPLEFT", kindPanel, "TOPRIGHT", -4, 0)
+		placePanel:Show()
+	end
+
+	-- First level: All activities, then Dungeon, Raid and World Boss with an
+	-- arrow, then everything that has no places under it. Every row is flush
+	-- left, and the panel hangs from the button, so it opens downwards and the
+	-- second level opens alongside it.
+	local function openKinds()
+		ensurePanels()
+		-- One menu at a time: the difficulty and class dropdowns close here, and
+		-- they close this one from their own handlers.
+		CloseDropDownMenus()
+		local f = (ACS_DB and ACS_DB.filter) or {}
+		local current = f.kind or "ALL"
+		local target = f.target or "ALL"
+		local counts = kindCounts()
+		local entries = {}
+		entries[#entries + 1] = {
+			text = mark("All activities", current == "ALL"),
+			onClick = function()
+				pickKind("ALL", "ALL")
+				hidePicker()
+			end,
+			onEnter = function()
+				if placePanel then placePanel:Hide() end
+			end,
+		}
+		local grouped = {}
+		local cats = AGF.KIND_CATEGORIES or {}
+		for c = 1, #cats do
+			local cat = cats[c]
+			local total, any = 0, false
+			for i = 1, #counts do
+				if cat.kinds[counts[i].kind] then
+					any = true
+					grouped[counts[i].kind] = true
+					total = total + counts[i].count
+				end
+			end
+			if any then
+				entries[#entries + 1] = {
+					text = mark(cat.label .. "  (" .. total .. ")",
+						current == cat.id and target == "ALL"),
+					arrow = ">",
+					-- Hover shows the places, click takes all of them.
+					onEnter = function() openPlaces(cat) end,
+					onClick = function()
+						pickKind(cat.id, "ALL")
+						hidePicker()
+					end,
+				}
+			end
+		end
+		for i = 1, #counts do
+			local c = counts[i]
+			if not grouped[c.kind] then
+				entries[#entries + 1] = {
+					text = mark(c.label .. "  (" .. c.count .. ")",
+						current == c.kind),
+					onClick = function()
+						pickKind(c.kind, "ALL")
+						hidePicker()
+					end,
+					onEnter = function()
+						if placePanel then placePanel:Hide() end
+					end,
+				}
+			end
+		end
+		fillPanel(kindPanel, entries, 1, 156)
+		kindPanel:ClearAllPoints()
+		kindPanel:SetPoint("TOPLEFT", p.kindButton, "BOTTOMLEFT", 0, -2)
+		kindPanel:Show()
+		catcher:Show()
+	end
 
 	p.kindButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	p.kindButton:SetScript("OnClick", function(self, button)
 		if button == "RightButton" then
-			pickKind("ALL")
+			hidePicker()
+			pickKind("ALL", "ALL")
 			return
 		end
-		ToggleDropDownMenu(1, nil, p.kindMenu, self, 0, 0)
+		if kindPanel and kindPanel:IsShown() then
+			hidePicker()
+		else
+			openKinds()
+		end
 	end)
-	item(p.kindButton, EVERY, 30, 20)
+	p:HookScript("OnHide", hidePicker)
+	item(p.kindButton, EVERY, 21, 18)
+
+	-- Difficulty. Raids and world bosses run Normal, Heroic, Mythic and
+	-- Ascended here, and a keystone row counts as Mythic.
+	gap(4, PVE_ONLY, diffShown)
+	p.diffLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	p.diffLabel:SetText("Difficulty")
+	item(p.diffLabel, PVE_ONLY, 12, 14, diffShown)
+
+	p.diffButton = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+	p.diffButton:SetWidth(150)
+	p.diffButton:SetHeight(20)
+	p.diffButton:SetText("All difficulties")
+	p.diffMenu = CreateFrame("Frame", "AGFDiffMenu", UIParent, "UIDropDownMenuTemplate")
+	p.diffMenu.displayMode = "MENU"
+
+	local function pickDiff(value)
+		ACS_DB.filter.difficulty = value
+		-- The keystone window belongs to a mythic dungeon and to nothing else.
+		if not (ACS_DB.filter.kind == "CAT_DGN" and value == "Mythic") then
+			ACS_DB.filter.minKey = 0
+			ACS_DB.filter.maxKey = 0
+		end
+		AGF.RefreshFilterPanel()
+		AGF.Refresh()
+	end
+
+	local function initDiffMenu(self, level)
+		local current = (ACS_DB and ACS_DB.filter and ACS_DB.filter.difficulty) or "ALL"
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = "All difficulties"
+		info.checked = (current == "ALL")
+		info.func = function() pickDiff("ALL") end
+		UIDropDownMenu_AddButton(info, level)
+		local kind = (ACS_DB and ACS_DB.filter and ACS_DB.filter.kind) or "ALL"
+		local list = (AGF.DifficultyChoices and AGF.DifficultyChoices(kind))
+			or AGF.DIFF_ORDER or {}
+		for i = 1, #list do
+			local name = list[i]
+			local entry = UIDropDownMenu_CreateInfo()
+			entry.text = name
+			entry.checked = (current == name)
+			entry.func = function() pickDiff(name) end
+			UIDropDownMenu_AddButton(entry, level)
+		end
+	end
+
+	UIDropDownMenu_Initialize(p.diffMenu, initDiffMenu, "MENU")
+
+	p.diffButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	p.diffButton:SetScript("OnClick", function(self, button)
+		if button == "RightButton" then
+			pickDiff("ALL")
+			return
+		end
+		if AGF.HideKindPicker then
+			AGF.HideKindPicker()
+		end
+		ToggleDropDownMenu(1, nil, p.diffMenu, self, 0, 0)
+	end)
+	item(p.diffButton, PVE_ONLY, 21, 18, diffShown)
+
+	-- Keystone level, only under a mythic dungeon. Left empty it means any key,
+	-- and a post that names no key passes an open window only.
+	gap(4, PVE_ONLY, keyShown)
+	p.keyLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	p.keyLabel:SetText("Mythic+ Keystone range")
+	item(p.keyLabel, PVE_ONLY, 12, 14, keyShown)
+
+	p.minKey = CreateFrame("EditBox", "AGF_MinKey", p, "InputBoxTemplate")
+	p.minKey:SetWidth(38)
+	p.minKey:SetHeight(18)
+	p.minKey:SetAutoFocus(false)
+	p.minKey:SetNumeric(true)
+	p.minKey:SetMaxLetters(2)
+	item(p.minKey, PVE_ONLY, 20, 18, keyShown)
+
+	p.maxKey = CreateFrame("EditBox", "AGF_MaxKey", p, "InputBoxTemplate")
+	p.maxKey:SetWidth(38)
+	p.maxKey:SetHeight(18)
+	p.maxKey:SetPoint("LEFT", p.minKey, "RIGHT", 14, 0)
+	p.maxKey:SetAutoFocus(false)
+	p.maxKey:SetNumeric(true)
+	p.maxKey:SetMaxLetters(2)
+	p.maxKeyFollows = true
+
+	local function commitKeys()
+		ACS_DB.filter.minKey = tonumber(p.minKey:GetText()) or 0
+		ACS_DB.filter.maxKey = tonumber(p.maxKey:GetText()) or 0
+		AGF.Refresh()
+	end
+	p.minKey:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	p.maxKey:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	p.minKey:SetScript("OnEditFocusLost", commitKeys)
+	p.maxKey:SetScript("OnEditFocusLost", commitKeys)
 
 	-- Class. Offered only where characters have one, so the panel on the
 	-- classless realms looks exactly as it did before.
+	gap(4, GROUPS, AGF.PackHasClasses)
 	p.classLabel = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	p.classLabel:SetText("Class")
-	item(p.classLabel, GROUPS, 20, 16, AGF.PackHasClasses)
+	item(p.classLabel, GROUPS, 12, 14, AGF.PackHasClasses)
 
 	p.classButton = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 	p.classButton:SetWidth(150)
@@ -1729,24 +2467,33 @@ local function createFilterPanel()
 			pickClass("ALL")
 			return
 		end
+		if AGF.HideKindPicker then
+			AGF.HideKindPicker()
+		end
 		ToggleDropDownMenu(1, nil, p.classMenu, self, 0, 0)
 	end)
-	item(p.classButton, GROUPS, 30, 20, AGF.PackHasClasses)
+	item(p.classButton, GROUPS, 21, 18, AGF.PackHasClasses)
 
 	p.resetButton = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
 	p.resetButton:SetWidth(80)
 	p.resetButton:SetHeight(20)
 	p.resetButton:SetText("Reset")
 	p.resetButton:SetScript("OnClick", function()
-		ACS_DB.filter.roles = { tank = false, heal = false, damage = false }
+		ACS_DB.filter.roles = { tank = false, heal = false, damage = false,
+			support = false }
+		ACS_DB.filter.difficulty = "ALL"
 		ACS_DB.filter.needAura = false
 		ACS_DB.filter.needLooms = false
+		ACS_DB.filter.maxOnly = false
 		ACS_DB.filter.class = "ALL"
 		ACS_DB.filter.minLevel = 0
 		ACS_DB.filter.maxLevel = 0
+		ACS_DB.filter.minKey = 0
+		ACS_DB.filter.maxKey = 0
 		ACS_DB.filter.word = ""
 		ACS_DB.filter.intent = "BOTH"
 		ACS_DB.filter.kind = "ALL"
+		ACS_DB.filter.target = "ALL"
 		AGF.RefreshFilterPanel()
 		AGF.Refresh()
 	end)
@@ -1776,7 +2523,9 @@ function AGF.LayoutFilterPanel()
 		return
 	end
 	local section = (AGF.GetSection and AGF.GetSection()) or "PVE"
-	local y = -36
+	-- Checkbox rows sit three pixels closer together than they did, and the
+	-- title gets those pixels back so the first checkbox does not hang off it.
+	local y = -28
 	for i = 1, #filterPanel.items do
 		local it = filterPanel.items[i]
 		if it.sections[section] and (not it.when or it.when()) then
@@ -1795,10 +2544,19 @@ function AGF.LayoutFilterPanel()
 			filterPanel.maxLevel:Hide()
 		end
 	end
-	y = y - 12
+	if filterPanel.maxKey then
+		if filterPanel.minKey:IsShown() then
+			filterPanel.maxKey:Show()
+		else
+			filterPanel.maxKey:Hide()
+		end
+	end
+	y = y - 8
 	filterPanel.resetButton:ClearAllPoints()
 	filterPanel.resetButton:SetPoint("TOPLEFT", filterPanel, "TOPLEFT", 20, y)
-	filterPanel:SetHeight(-y + 40)
+	-- Room for the button itself plus a margin, so Reset and Close no longer
+	-- sit on the bottom edge of the frame.
+	filterPanel:SetHeight(-y + 34)
 end
 
 function AGF.RefreshFilterPanel()
@@ -1813,6 +2571,12 @@ function AGF.RefreshFilterPanel()
 	end
 	filterPanel.auraCheck:SetChecked(f.needAura and true or false)
 	filterPanel.loomsCheck:SetChecked(f.needLooms and true or false)
+	filterPanel.maxOnlyCheck:SetChecked(f.maxOnly and true or false)
+	-- The cap follows the realm, so the caption is rebuilt on every refresh.
+	if filterPanel.maxOnlyCheck.label then
+		filterPanel.maxOnlyCheck.label:SetText("Level "
+			.. (AGF.LEVEL_CAP or 60) .. " only")
+	end
 
 	local words = INTENT_TEXT[section] or INTENT_TEXT.PVE
 	filterPanel.intentLabel:SetText(words.title)
@@ -1826,10 +2590,21 @@ function AGF.RefreshFilterPanel()
 
 	filterPanel.minLevel:SetText((f.minLevel or 0) > 0 and tostring(f.minLevel) or "")
 	filterPanel.maxLevel:SetText((f.maxLevel or 0) > 0 and tostring(f.maxLevel) or "")
+	filterPanel.minKey:SetText((f.minKey or 0) > 0 and tostring(f.minKey) or "")
+	filterPanel.maxKey:SetText((f.maxKey or 0) > 0 and tostring(f.maxKey) or "")
+	filterPanel.wordSuppress = true
 	filterPanel.word:SetText(f.word or "")
-	local kind = f.kind or "ALL"
-	filterPanel.kindButton:SetText(kind == "ALL" and "All activities"
-		or AGF.KindName(kind))
+	filterPanel.wordSuppress = false
+	local kindText = (AGF.KindFilterText and AGF.KindFilterText(f))
+		or "All activities"
+	-- The button is 150 wide. A long name is cut off with two dots rather than
+	-- shortened into something unrecognisable.
+	if #kindText > 21 then
+		kindText = kindText:sub(1, 19) .. ".."
+	end
+	filterPanel.kindButton:SetText(kindText)
+	local diff = f.difficulty or "ALL"
+	filterPanel.diffButton:SetText(diff == "ALL" and "All difficulties" or diff)
 	local class = f.class or "ALL"
 	filterPanel.classButton:SetText(class == "ALL" and "All classes" or class)
 	AGF.LayoutFilterPanel()
@@ -1878,6 +2653,29 @@ end
 
 -- Window --------------------------------------------------------------------
 
+local DEFAULT_W, DEFAULT_H = 780, 460
+local MIN_W, MIN_H = 640, 260
+
+local function screenSize()
+	local w = UIParent:GetWidth() or DEFAULT_W
+	local h = UIParent:GetHeight() or DEFAULT_H
+	return w, h
+end
+
+-- A saved size is never trusted. A bad drag, a resolution change or an older
+-- build can leave a window wider than the screen, and without this the only
+-- way back was to wipe the saved variables.
+local function clampSize(w, h)
+	local sw, sh = screenSize()
+	w = tonumber(w) or DEFAULT_W
+	h = tonumber(h) or DEFAULT_H
+	if w < MIN_W then w = MIN_W end
+	if h < MIN_H then h = MIN_H end
+	if w > sw then w = sw end
+	if h > sh then h = sh end
+	return w, h
+end
+
 local function savePosition()
 	local x, y = frame:GetLeft(), frame:GetBottom()
 	if x and y then
@@ -1889,10 +2687,36 @@ local function savePosition()
 	ACS_DB.window.h = frame:GetHeight()
 end
 
+-- A window held by its centre grows in both directions while it is sized, so
+-- it has to hang from its bottom left corner before any drag starts. Doing
+-- that rewrite in the same moment sizing began is what threw the window into
+-- the screen corner: the client had not recalculated the rect yet, so the new
+-- anchor was resolved against a stale one. It now happens only when nothing
+-- else is going on, which is on show and after a move.
+local function normalizeAnchor()
+	if not frame then
+		return
+	end
+	if frame:GetNumPoints() == 1 then
+		local point, _, relPoint = frame:GetPoint(1)
+		if point == "BOTTOMLEFT" and relPoint == "BOTTOMLEFT" then
+			return
+		end
+	end
+	local left, bottom = frame:GetLeft(), frame:GetBottom()
+	if not left or not bottom then
+		return
+	end
+	frame:ClearAllPoints()
+	frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+end
+
 local function createWindow()
 	frame = CreateFrame("Frame", "AGF_Window", UIParent)
-	frame:SetWidth(ACS_DB.window.w or 780)
-	frame:SetHeight(ACS_DB.window.h or 460)
+	local startW, startH = clampSize(ACS_DB.window.w, ACS_DB.window.h)
+	frame:SetWidth(startW)
+	frame:SetHeight(startH)
+	ACS_DB.window.w, ACS_DB.window.h = startW, startH
 	if ACS_DB.window.hasPos then
 		frame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", ACS_DB.window.x, ACS_DB.window.y)
 	else
@@ -1904,11 +2728,15 @@ local function createWindow()
 	frame:EnableMouse(true)
 	frame:SetMovable(true)
 	frame:SetResizable(true)
-	frame:SetMinResize(640, 260)
+	frame:SetMinResize(MIN_W, MIN_H)
+	-- The client happily sizes a frame past the screen edge, which is how the
+	-- window ended up twice as wide as the monitor with the grip out of reach.
+	frame:SetMaxResize(screenSize())
 	frame:RegisterForDrag("LeftButton")
 	frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
 	frame:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
+		normalizeAnchor()
 		savePosition()
 	end)
 	frame:EnableMouseWheel(true)
@@ -1986,16 +2814,6 @@ local function createWindow()
 			offset = 0
 			AGF.SetSection(s.id)
 		end)
-		b:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:AddLine(s.label)
-			GameTooltip:AddLine("Switches to the " .. s.label .. " tabs.",
-				1, 1, 1, true)
-			GameTooltip:AddLine("Each section keeps its own filters and"
-				.. " columns.", 0.7, 0.7, 0.7, true)
-			GameTooltip:Show()
-		end)
-		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		sectionButtons[s.id] = b
 		sprev = b
 	end
@@ -2011,17 +2829,6 @@ local function createWindow()
 			offset = 0
 			AGF.SetMode(key)
 		end)
-		tab:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:AddLine(AGF.BucketName and AGF.BucketName(key)
-				or (AGF.BUCKET_LABEL[key] or key))
-			GameTooltip:AddLine("The number is how many posts this tab"
-				.. " holds.", 1, 1, 1, true)
-			GameTooltip:AddLine("With a filter on, 4/29 means four of the"
-				.. " twenty-nine pass it.", 0.7, 0.7, 0.7, true)
-			GameTooltip:Show()
-		end)
-		tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		tabs[key] = tab
 	end
 
@@ -2060,8 +2867,16 @@ local function createWindow()
 	alertsButton:SetWidth(96)
 	alertsButton:SetHeight(22)
 	alertsButton:SetText("Alerts: OFF")
-	alertsButton:RegisterForClicks("LeftButtonUp")
-	alertsButton:SetScript("OnClick", function(self)
+	alertsButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	alertsButton:SetScript("OnClick", function(self, button)
+		if button == "RightButton" then
+			-- Same switch as the minimap button: unlock the popup, drag it
+			-- where you want it, right-click again to lock it.
+			if AGF.ToggleAlertLock then
+				AGF.ToggleAlertLock()
+			end
+			return
+		end
 		ACS_DB.alert.enabled = not ACS_DB.alert.enabled
 		AGF.Print("Alerts " .. (ACS_DB.alert.enabled and "on" or "off"))
 		AGF.Refresh()
@@ -2070,10 +2885,8 @@ local function createWindow()
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:AddLine("Alerts")
 		GameTooltip:AddLine("Turns alerts on or off.", 1, 1, 1, true)
-		GameTooltip:AddLine("Popup, sound and chat keep their own settings.",
+		GameTooltip:AddLine("Right-click to move the popup window.",
 			0.7, 0.7, 0.7, true)
-		GameTooltip:AddLine("Right-click the minimap button to move the"
-			.. " popup.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	alertsButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2142,8 +2955,8 @@ local function createWindow()
 		GameTooltip:AddLine("Filters")
 		GameTooltip:AddLine("Shows only the posts you want to see.",
 			1, 1, 1, true)
-		GameTooltip:AddLine("Each section keeps its own set, saved between"
-			.. " sessions.", 0.7, 0.7, 0.7, true)
+		GameTooltip:AddLine("Each section keeps its own set.",
+			0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	filtersButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2163,10 +2976,10 @@ local function createWindow()
 	scopeButton:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:AddLine("Alert scope")
-		GameTooltip:AddLine("All: every section can alert, each judged by its"
-			.. " own saved filters.", 1, 1, 1, true)
-		GameTooltip:AddLine("Section: only the section you are looking at can"
-			.. " alert.", 1, 1, 1, true)
+		GameTooltip:AddLine("All: every tab can alert, each judged by its"
+			.. " own section filters.", 1, 1, 1, true)
+		GameTooltip:AddLine("Section: only the tab you are looking at can"
+			.. " alert, for example PvE LFG.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	scopeButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2257,14 +3070,20 @@ local function createWindow()
 			rowsCatcher:SetScript("OnMouseDown", function(catcher)
 				catcher:Hide()
 				CloseDropDownMenus()
+				forwardMenuClick()
 			end)
 			-- Also hide the catcher when the menu closes any other way, so it
 			-- never swallows a click while no menu is open.
 			rowsCatcher:SetScript("OnUpdate", function(catcher)
 				if not (DropDownList1 and DropDownList1:IsShown()) then
 					catcher:Hide()
+					return
 				end
+				-- Same reason as the filter panel catcher: the buttons
+				-- underneath cannot light themselves up.
+				paintMenuHover()
 			end)
+			rowsCatcher:SetScript("OnHide", clearMenuHover)
 			rowsCatcher:Hide()
 		end
 		UIDropDownMenu_Initialize(rowsMenu, initRowsMenu, "MENU")
@@ -2280,8 +3099,8 @@ local function createWindow()
 		GameTooltip:AddLine("Rows")
 		GameTooltip:AddLine("Chooses which columns the table shows.",
 			1, 1, 1, true)
-		GameTooltip:AddLine("Each section keeps its own choice, saved between"
-			.. " sessions.", 0.7, 0.7, 0.7, true)
+		GameTooltip:AddLine("Each section keeps its own choice.",
+			0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	rowsButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2297,12 +3116,18 @@ local function createWindow()
 			rowsCatcher:SetScript("OnMouseDown", function(catcher)
 				catcher:Hide()
 				CloseDropDownMenus()
+				forwardMenuClick()
 			end)
 			rowsCatcher:SetScript("OnUpdate", function(catcher)
 				if not (DropDownList1 and DropDownList1:IsShown()) then
 					catcher:Hide()
+					return
 				end
+				-- Same reason as the filter panel catcher: the buttons
+				-- underneath cannot light themselves up.
+				paintMenuHover()
 			end)
+			rowsCatcher:SetScript("OnHide", clearMenuHover)
 			rowsCatcher:Hide()
 		end
 		return rowsCatcher
@@ -2347,7 +3172,6 @@ local function createWindow()
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:AddLine("Skins")
 		GameTooltip:AddLine("Changes how both windows look.", 1, 1, 1, true)
-		GameTooltip:AddLine("Saved between sessions.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	skinsButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2381,6 +3205,88 @@ local function createWindow()
 			offset = 0
 			AGF.Refresh()
 		end)
+
+		-- Width handle. It lives on the right edge of the heading and only
+		-- there, so a click anywhere else in the header still sorts.
+		local grip = CreateFrame("Frame", nil, headerBar)
+		grip:SetWidth(8)
+		grip:SetHeight(18)
+		grip:EnableMouse(true)
+		grip:SetFrameLevel(button:GetFrameLevel() + 4)
+		grip.index = i
+		local mark = grip:CreateTexture(nil, "OVERLAY")
+		mark:SetTexture(1, 1, 1, 0.4)
+		mark:SetWidth(1)
+		mark:SetHeight(12)
+		mark:SetPoint("CENTER")
+		mark:Hide()
+		local function cursorX(self)
+			local scale = self:GetEffectiveScale()
+			if not scale or scale == 0 then
+				scale = 1
+			end
+			return GetCursorPosition() / scale
+		end
+		local function dragWidth(self)
+			local col = COLS[self.index]
+			if not col then
+				return
+			end
+			local w = (self.startW or col.w) + (cursorX(self) - (self.startX or 0))
+			local min = colMinWidth(self.index)
+			if w < min then
+				w = min
+			end
+			if w > MAX_COL_W then
+				w = MAX_COL_W
+			end
+			w = math.floor(w + 0.5)
+			if w ~= col.w then
+				local store = widthStore(true)
+				if store then
+					store[col.key] = w
+				end
+				col.w = w
+				layout()
+			end
+		end
+		local function stopDrag(self)
+			self.dragging = false
+			self:SetScript("OnUpdate", nil)
+			if not self:IsMouseOver() then
+				mark:Hide()
+			end
+		end
+		grip:SetScript("OnEnter", function()
+			mark:Show()
+		end)
+		grip:SetScript("OnLeave", function(self)
+			if not self.dragging then
+				mark:Hide()
+			end
+		end)
+		grip:SetScript("OnMouseDown", function(self)
+			local col = COLS[self.index]
+			if not col then
+				return
+			end
+			self.startX = cursorX(self)
+			self.startW = col.w
+			self.dragging = true
+			mark:Show()
+			-- Released outside the handle still ends the drag, because the
+			-- button state is checked on every frame.
+			self:SetScript("OnUpdate", function(s)
+				if not IsMouseButtonDown("LeftButton") then
+					stopDrag(s)
+					return
+				end
+				dragWidth(s)
+			end)
+		end)
+		grip:SetScript("OnMouseUp", stopDrag)
+		button.widthGrip = grip
+
 		headers[i] = button
 	end
 
@@ -2502,8 +3408,6 @@ local function createWindow()
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip:AddLine("Clear Tab")
 		GameTooltip:AddLine("Empties the tab you are looking at.", 1, 1, 1, true)
-		GameTooltip:AddLine("Every other tab keeps its posts.",
-			0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	clearButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2544,8 +3448,6 @@ local function createWindow()
 		GameTooltip:AddLine("Clear All")
 		GameTooltip:AddLine("Empties every tab in all three sections.",
 			1, 1, 1, true)
-		GameTooltip:AddLine("Filters, columns and skins are kept. It asks"
-			.. " first.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	clearAllButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2563,8 +3465,6 @@ local function createWindow()
 		GameTooltip:AddLine("Whisp Templates")
 		GameTooltip:AddLine("Six whisper lines, with the details of the post"
 			.. " filled in as you send.", 1, 1, 1, true)
-		GameTooltip:AddLine("Each Unsure tab shares the line of its own"
-			.. " section.", 0.7, 0.7, 0.7, true)
 		GameTooltip:Show()
 	end)
 	whisperButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2578,7 +3478,7 @@ local function createWindow()
 		hint:ClearAllPoints()
 		hint:SetPoint("BOTTOMRIGHT", -(m + 16), m)
 	end)
-	hint:SetText("Left click a value to edit - W sends your whisper - right click a row for actions")
+	hint:SetText("")
 	hint:SetJustifyH("RIGHT")
 	frame.hint = hint
 
@@ -2588,11 +3488,69 @@ local function createWindow()
 	resizeGrip:SetPoint("BOTTOMRIGHT", -6, 6)
 	resizeGrip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	resizeGrip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-	resizeGrip:SetScript("OnMouseDown", function()
-		frame:StartSizing("BOTTOMRIGHT")
+	-- StartSizing is gone. It resolves the drag against whatever anchor the
+	-- frame happens to carry, and after /acs reset or a fresh login that is a
+	-- CENTER anchor, so the window grew away from the middle in both
+	-- directions at twice the speed and the corner shot off the screen. The
+	-- size is driven by hand now: the top left corner is pinned before the
+	-- first pixel moves and width and height follow the cursor one to one.
+	local DRAG_SLOP = 4
+	local function sizeStep(self)
+		if not self.sizing then
+			self:SetScript("OnUpdate", nil)
+			return
+		end
+		-- A mouse up over another frame never reaches this button, so the drag
+		-- also ends when the button is simply no longer held.
+		if not IsMouseButtonDown("LeftButton") then
+			local stop = self:GetScript("OnMouseUp")
+			if stop then
+				stop(self)
+			end
+			return
+		end
+		local scale = frame:GetEffectiveScale()
+		if not scale or scale <= 0 then
+			scale = 1
+		end
+		local x, y = GetCursorPosition()
+		local w = self.startW + (x - self.startX) / scale
+		local h = self.startH - (y - self.startY) / scale
+		w, h = clampSize(w, h)
+		frame:SetWidth(w)
+		frame:SetHeight(h)
+	end
+	resizeGrip:SetScript("OnMouseDown", function(self)
+		self.startX, self.startY = GetCursorPosition()
+		self.startW, self.startH = frame:GetWidth(), frame:GetHeight()
+		self.sizing = true
+		-- Growing from the bottom right corner has to leave the top left one
+		-- where it is, so that is the corner the frame hangs from while the
+		-- drag lasts. Exact numbers, no jump.
+		local left, top = frame:GetLeft(), frame:GetTop()
+		if left and top then
+			frame:ClearAllPoints()
+			frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+		end
+		self:SetScript("OnUpdate", sizeStep)
 	end)
-	resizeGrip:SetScript("OnMouseUp", function()
+	resizeGrip:SetScript("OnMouseUp", function(self)
+		if not self.sizing then
+			return
+		end
+		self.sizing = false
+		self:SetScript("OnUpdate", nil)
 		frame:StopMovingOrSizing()
+		normalizeAnchor()
+		local x, y = GetCursorPosition()
+		local dx = x - (self.startX or x)
+		local dy = y - (self.startY or y)
+		if dx < 0 then dx = -dx end
+		if dy < 0 then dy = -dy end
+		if dx <= DRAG_SLOP and dy <= DRAG_SLOP then
+			frame:SetWidth(self.startW or frame:GetWidth())
+			frame:SetHeight(self.startH or frame:GetHeight())
+		end
 		savePosition()
 		layout()
 		AGF.Refresh()
@@ -2605,6 +3563,7 @@ local function createWindow()
 	end)
 	frame:SetScript("OnShow", function()
 		if ACS_DB then ACS_DB.window.shown = true end
+		normalizeAnchor()
 		layout()
 		updateHint()
 		AGF.Refresh()
@@ -2631,6 +3590,35 @@ function AGF.HideMain()
 	if frame then
 		frame:Hide()
 	end
+end
+
+-- /acs reset. The way back when the window has been dragged off screen or
+-- sized into something unusable.
+function AGF.ResetWindow()
+	if not frame then
+		return false
+	end
+	frame:StopMovingOrSizing()
+	if resizeGrip then
+		resizeGrip.armed = false
+		resizeGrip.sizing = false
+	end
+	local w, h = clampSize(DEFAULT_W, DEFAULT_H)
+	frame:SetWidth(w)
+	frame:SetHeight(h)
+	frame:ClearAllPoints()
+	frame:SetPoint("CENTER")
+	-- Straight back to a bottom left anchor. A window left on CENTER is what
+	-- made the next resize drag explode.
+	normalizeAnchor()
+	AGF.ResetColumnWidths()
+	ACS_DB.window.w, ACS_DB.window.h = w, h
+	ACS_DB.window.x, ACS_DB.window.y = nil, nil
+	ACS_DB.window.hasPos = false
+	closeFilterPanel()
+	layout()
+	AGF.Refresh()
+	return true
 end
 
 -- /acs always toggles the main window. The mini feed is a separate layer

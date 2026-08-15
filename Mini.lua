@@ -38,14 +38,16 @@ local SECTION_COLOR = {
 	PVE = { 0.45, 0.85, 0.45 },
 	PVP = { 0.95, 0.45, 0.45 },
 	TRADE = { 1, 0.82, 0.2 },
+	GUILD = { 0.6, 0.7, 1 },
 }
 
-local STRIPE_LEGEND = { "PVE", "PVP", "TRADE" }
+local STRIPE_LEGEND = { "PVE", "PVP", "TRADE", "GUILD" }
 
 local SECTION_NAME = {
 	PVE = "PvE",
 	PVP = "PvP",
 	TRADE = "Trade",
+	GUILD = "Guild",
 }
 
 local function db()

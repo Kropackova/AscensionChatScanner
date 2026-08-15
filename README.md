@@ -50,15 +50,17 @@ Download the release archive from the [Releases page](https://github.com/Kropack
 ## Features
 
 - **Reads every channel you have joined** - numbered channels, guild, officer, party, raid, say, yell, whisper, emote, battleground. Two independent capture paths, so it sees what your chat frame sees.
-- **Three sections, nine tabs** - PvE, PvP and Trade, each split by intent: LFM, LFG and Unsure for the group sections, WTS, WTB and Unsure for Trade.
-- **Parses the post** - role, aura, heirlooms, level range, activity and traded goods, including compact forms such as `LF2M`, `3/3 aura`, `full looms`, `no aura`, `WTB 5x bazaar token`.
+- **Four sections, ten tabs** - PvE, PvP, Trade and Guild, each split by intent: LFM, LFG and Unsure for the group sections, WTS, WTB and Unsure for Trade, one plain list for Guild.
+- **Parses the post** - role, aura, heirlooms, level range, difficulty, gear level, activity and traded goods, including compact forms such as `LF2M`, `3/3 aura`, `full looms`, `no aura`, `WTB 5x bazaar token`.
 - **The parsed values are editable** - Role, Aura, Looms, iLvl, Filled and Level; click a cell to correct it, and your edit is locked so a later post never overwrites it.
-- **Filters per section** - role, aura, looms, activity, level range and free text. Each section keeps its own filter set and only applies it in that section.
+- **Filters per section** - role, aura, looms, activity, difficulty, level range, keystone range, free text, and a **Level 60 only** switch that hides levelling traffic. Each section keeps its own filter set and only applies it in that section.
 - **Rows** - pick which columns each section shows; the choice survives a logout.
-- **Alerts** - sound, chat line or popup when a matching post appears, with a scope switch between the active section and everything.
-- **One-click whisper** - six shared templates with ten placeholders: six read from the post, two more on profession rows and two describing your own character.
+- **Alerts** - sound, chat line or popup when a matching post appears, with a scope switch between the tab you are looking at and everything.
+- **One-click whisper** - seven shared templates with eleven placeholders: seven read from the post, two more on profession rows and two describing your own character.
 - **Mythic keystones** - the keystone level is read from the post and shown in place of the activity, so a row reads `Mythic+ 7: Uldaman`. Item links, `mythic+7`, `m+7` and `M0` are all understood.
-- **Seven skins** and a resizable window that remembers its size and position.
+- **Difficulty** - Normal, Heroic, Mythic and Ascended, read from the post and editable by hand.
+- **Gear level** - an iLvl column, `{ilvl}` in whisper templates and `/acs ilvl` to see how your own average is worked out.
+- **Seven skins**, resizable columns, and a window that remembers its size and position.
 
 ---
 
@@ -75,8 +77,8 @@ Download the release archive from the [Releases page](https://github.com/Kropack
 ## Quick start
 
 1. `/acs` opens the window.
-2. Pick a section: **PvE**, **PvP** or **Trade**.
-3. Pick a tab: **LFM**, **LFG** or **Unsure**, or **WTS**, **WTB** and **Unsure** in Trade.
+2. Pick a section: **PvE**, **PvP**, **Trade** or **Guild**.
+3. Pick a tab: **LFM**, **LFG** or **Unsure**, or **WTS**, **WTB** and **Unsure** in Trade. Guild is one list.
 4. Wait. Posts appear as they are written; nothing is read retroactively.
 5. Right-click a row for whisper, invite, target, ignore and a manual move to another tab.
 
@@ -91,6 +93,7 @@ The section row selects the topic, the tab row the intent.
 | PvE | LFM, LFG, Unsure | Filling a group, looking for one, ambiguous |
 | PvP | LFM, LFG, Unsure | Same, for arena and battlegrounds |
 | Trade | WTS, WTB, Unsure | Selling, buying, ambiguous |
+| Guild | one list | Guild recruitment adverts |
 
 The number on a tab is how many rows it holds. With a filter on, it reads `4/29`: four rows shown out of twenty-nine.
 
@@ -103,12 +106,13 @@ The number on a tab is how many rows it holds. With a filter on, it reads `4/29`
 | Time | When the post was seen |
 | Name | The sender |
 | Activity | What the post is about, from the content pack: raid, dungeon, random dungeon, world boss, with the named instance or boss where the post gives one. A mythic keystone shows its level instead: `Mythic+ 7: Uldaman` |
-| Role | Tank, Healer, Damage, where the text says so |
+| Role | Tank, Healer, Damage, Support, where the text says so |
+| Difficulty | Normal, Heroic, Mythic or Ascended, from the post. A keystone is Mythic by definition |
 | Aura | Yes or No from the post; set Maybe by hand when the post is unclear |
 | Looms | Yes or No from the post; set Maybe by hand when the post is unclear |
 | iLvl | The item level the post asks for, PvE and PvP. A bare number above 60 is read as an item level, because 60 is the level cap |
 | Filled | Raid progress such as 15/25, PvE only |
-| Level | The level or the level range in the text, up to the level cap of 60 |
+| Level | The level or the level range in the text, up to the level cap. A keystone run never carries one, because a key is level cap content |
 | Message | The post itself |
 | W | Sends the whisper line for this tab |
 
@@ -152,7 +156,13 @@ A word of warning: with wide alert rules the feed fills up in a minute and is us
 
 ## Filters
 
-The **Filters** button opens the filter panel for the active section. Role, aura, looms, what the sender is looking for, activity, level range and a free text field. A filter set belongs to its section: switch to another section and its own set applies, switch back and yours is still there.
+The **Filters** button opens the filter panel for the active section. Role, aura, looms, what the sender is looking for, activity, difficulty, level range, keystone range and a free text field. A filter set belongs to its section: switch to another section and its own set applies, switch back and yours is still there.
+
+**Level 60 only** hides levelling traffic: aura and heirloom posts, XP farms, boost and carry runs, and anything advertising a level below the cap. Keystone runs are level cap content, so they always stay.
+
+**Activity** works in two steps. Click **Dungeon**, **Raid** or **World Boss** to take the whole category, or open one and pick a single instance. The number in brackets is how many posts of that kind sit in the tab you have open.
+
+**Mythic+ keystone range** shows only keys inside a range, for example 7 to 12. A post with no key number is kept.
 
 ![The filter panel in the PvE section](docs/02-filters.png)
 
@@ -162,7 +172,9 @@ The **Filters** button opens the filter panel for the active section. Role, aura
 
 ## Alerts
 
-**Alerts** switches alerting on and off, the bell mutes the sound, and the scope button switches between **Section** and **All**.
+**Alerts** switches alerting on and off, the bell mutes the sound, and the scope button switches between **Section** and **All**. **Section** means the tab you are looking at, so sitting on PvE LFG keeps PvE LFM quiet. **All** lets every tab alert, each judged by its own section filters.
+
+Right-click **Alerts** to unlock the popup and drag it where you want it, right-click again to lock it in place.
 
 - `/acs alert mode lfm | lfg | any` decides which intent alerts.
 - `/acs alert move` unlocks the popup so you can drag it, `/acs alert reset` puts it back.
@@ -176,9 +188,9 @@ The **Filters** button opens the filter panel for the active section. Role, aura
 
 ## Whispers
 
-`/acs whisper` opens a panel with six lines: PvE LFM, PvE LFG, PvP LFM, PvP LFG, Trade WTS and Trade WTB. There are nine tabs and six lines, so the Unsure tabs share one: PvE and PvP Unsure use the LFM line of their section, Trade Unsure uses the WTS line.
+`/acs whisper` opens a panel with seven lines: PvE LFM, PvE LFG, PvP LFM, PvP LFG, Trade WTS, Trade WTB and Guild. There are ten tabs and seven lines, so the Unsure tabs share one: PvE and PvP Unsure use the LFM line of their section, Trade Unsure uses the WTS line.
 
-Six placeholders are read from the post you are answering, two describe you, and two only appear on profession rows.
+Seven placeholders are read from the post you are answering, two describe you, and two only appear on profession rows.
 
 | Placeholder | Becomes |
 | --- | --- |
@@ -188,6 +200,7 @@ Six placeholders are read from the post you are answering, two describe you, and
 | `{aura}` | Whether the post mentions an aura |
 | `{looms}` | Whether the post mentions heirlooms |
 | `{size}` | The group size stated in the post |
+| `{ilvl}` | The gear level the post asks for |
 | `{myname}` | Your name |
 | `{mylevel}` | Your level |
 | `{prof}` | The profession in the post |
@@ -195,7 +208,7 @@ Six placeholders are read from the post you are answering, two describe you, and
 
 The addon cannot read your own role, so no placeholder does that.
 
-The **W** cell in a row sends the line for that row's tab. Set the six lines with the **Whisp Templates** button at the bottom of the window.
+The **W** cell in a row sends the line for that row's tab. Set the seven lines with the **Whisp Templates** button at the bottom of the window.
 
 ![The whisper template panel](docs/06-whisper-templates.png)
 
@@ -213,7 +226,7 @@ The **Skins** button switches between **Vanilla**, **Dark**, **Grid**, **Slate**
 
 A pack decides which activities exist and how they are named. The pack follows your realm.
 
-All three packs read the same content: the vanilla dungeons and raids, the world bosses, the random dungeon finder, mythic keystones, guild recruitment and High Risk. They differ only in what the realm adds.
+All packs read the same shape of content: dungeons and raids, world bosses, the random dungeon finder, mythic keystones, guild recruitment and High Risk. They differ in what the realm actually has.
 
 A mythic post replaces the activity caption with its keystone level, so `LFM [Keystone: Uldaman (3)] need dps` reads `Mythic+ 3: Uldaman`. The level is taken from the bracketed number, from `mythic+7`, from `m+7` and from `LF +5 mythic key`. A number that counts players is left alone, and `Completed Mythic: 10` is ignored altogether, because it states the highest key the sender has ever finished rather than the level of the group. Mythic raids read `Mythic: Molten Core`, without a level, since no keystone applies to a raid. Everything mythic sits behind **Mythic+** in the Activity filter.
 
@@ -224,15 +237,19 @@ High Risk is read as a PvP activity only where the line is about PvP. On their o
 - **Conquest of Azeroth** is the base.
 - **Ascension** adds Manastorm, both as an activity in the table and as an entry in the Activity filter.
 - **Classic** adds a **Class** column and a class filter, because characters on that realm have one. The other realms are classless, so the column is not offered there at all.
+- **TBC** is for Area 52: Burning Crusade dungeons, raids and world bosses only, and a level cap of 70. No vanilla instances, no Ascension custom dungeons, no World Boss Tour.
+
+The vanilla packs also carry the Ascension custom dungeons: Vault of the Inquisition, Road to De'Other Side, Karazhan Crypts, Torwatha and Blackrock Caverns, with their short forms.
 
 | Realm | Pack |
 | --- | --- |
-| Vol'jin, Rexxar | Conquest of Azeroth |
-| Area 52, Dawnrise, Darkmoon | Ascension |
+| Vol'jin, Rexxar, Conquest | Conquest of Azeroth |
+| Dawnrise, Darkmoon | Ascension |
+| Area 52 | TBC |
 | Bronzebeard | Classic |
 | Any other realm | Ascension |
 
-`/acs pack` shows the active pack, `/acs pack coa | ascension | classic | auto` switches it.
+`/acs pack` shows the active pack, `/acs pack coa | ascension | classic | tbc | auto` switches it. On `auto` the pack follows the realm you log in to.
 
 ---
 
@@ -241,7 +258,7 @@ High Risk is read as a PvP activity only where the line is about PvP. On their o
 | Command | Effect |
 | --- | --- |
 | `/acs` | Show or hide the window |
-| `/acs pve \| pvp \| trade` | Pick a section |
+| `/acs pve \| pvp \| trade \| guild` | Pick a section |
 | `/acs lfm \| lfg \| unsure \| wts \| wtb` | Pick a tab |
 | `/acs style vanilla \| dark \| grid \| slate \| parchment \| glass \| felfire` | Same as the Skins button |
 | `/acs clear` | Clear the current tab |
@@ -251,16 +268,20 @@ High Risk is read as a PvP activity only where the line is about PvP. On their o
 | `/acs minimap` | Show or hide the minimap button |
 | `/acs alert on \| off \| sound \| chat \| popup` | Alert settings |
 | `/acs alert mode lfm \| lfg \| any` | Which intent raises an alert |
-| `/acs alert scope section \| all` | Same as the scope button |
+| `/acs alert scope section \| all` | Same as the scope button; section means the open tab |
 | `/acs alert move` or `/acs alert unlock` | Unlock the popup so you can drag it |
 | `/acs alert lock` | Fix the popup in place |
 | `/acs alert reset` | Put the popup back in its default spot |
 | `/acs expiry 900` | Seconds a row stays listed |
 | `/acs own` | Include or exclude your own posts |
 | `/acs pack` | Show the active content pack |
-| `/acs pack coa \| ascension \| classic \| auto` | Switch the content pack |
+| `/acs pack coa \| ascension \| classic \| tbc \| auto` | Switch the content pack |
 | `/acs whisper` | Edit the whisper templates |
-| `/acs whisper pvelfm \| pvelfg \| pvplfm \| pvplfg \| wts \| wtb <text>` | Set one whisper line |
+| `/acs whisper pvelfm \| pvelfg \| pvplfm \| pvplfg \| wts \| wtb \| guild <text>` | Set one whisper line |
+| `/acs ilvl` | Print your gear level, `/acs ilvl <slot number>` for one item |
+| `/acs hidden` | List what the filter is dropping right now, grouped by reason |
+| `/acs reset` | Put the window back in the middle at its default size |
+| `/acs position reset` | The same thing |
 | `/acs probe` | Print a diagnostic report, useful when reporting a bug |
 | `/acs debug` | Print one line for every post the addon accepts |
 | `/acs help` | The list above, in game |
