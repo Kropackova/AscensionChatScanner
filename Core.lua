@@ -232,8 +232,9 @@ function AGF.TargetCounts(section, category)
 					local name = row.target
 					local fits = true
 					if category then
-						fits = (row.kind and category.kinds[row.kind]) and true
-							or false
+						fits = ((row.kind and category.kinds[row.kind])
+							or (row.activity and category.kinds[row.activity]))
+							and true or false
 					end
 					if name and name ~= "" and fits then
 						out[name] = (out[name] or 0) + 1
@@ -1030,7 +1031,11 @@ function AGF.PassesFilterWith(row, f)
 	if kind ~= "ALL" then
 		local cat = AGF.KIND_CATEGORY[kind]
 		if cat then
-			if not cat.kinds[row.kind] then
+			-- The kind answers first, the activity is the fallback. A row stored
+			-- by a build that overwrote its kind still lands in the category its
+			-- activity names.
+			if not (cat.kinds[row.kind]
+				or (row.activity and cat.kinds[row.activity])) then
 				return false
 			end
 			local target = f.target or "ALL"
@@ -1045,8 +1050,10 @@ function AGF.PassesFilterWith(row, f)
 				end
 				if lead then
 					-- Random Dungeon and the boss tour are activities, not
-					-- places, so they match on the row kind.
-					if row.kind ~= target then
+					-- places, so they match on the row kind. A row whose kind
+					-- was overwritten by an older build answers on its
+					-- activity instead.
+					if row.kind ~= target and row.activity ~= target then
 						return false
 					end
 				elseif row.target ~= target then
@@ -1095,7 +1102,8 @@ function AGF.PassesFilterWith(row, f)
 		-- A keystone is cap content whatever number it carries, and that
 		-- number reads exactly like a character level. "Keystone: Uldaman
 		-- (11)" is a key of eleven, not a level eleven player.
-		local keystone = (row.kind == "MYTHIC") or (row.mythicKey ~= nil)
+		local keystone = (row.kind == "MYTHIC") or (row.mythic == true)
+			or (row.mythicKey ~= nil)
 		if not keystone and row.level and row.level < cap then
 			return false
 		end
@@ -1113,7 +1121,9 @@ function AGF.PassesFilterWith(row, f)
 	-- "LF tank m+" belongs in 0 or 1 to X, not in a 7 to 12 window.
 	local minKey, maxKey = f.minKey or 0, f.maxKey or 0
 	if minKey > 0 or maxKey > 0 then
-		if row.kind ~= "MYTHIC" then
+		-- A mythic raid keeps the RAID kind and a mythic random dungeon keeps
+		-- RDF, so the mythic flag decides here and the kind is the fallback.
+		if row.kind ~= "MYTHIC" and row.mythic ~= true then
 			return false
 		end
 		local key = row.mythicKey
@@ -1248,7 +1258,7 @@ end
 -- keystone and no levelling flag, so the newer filters would drop them or show
 -- them empty. Reparsing the message they were built from fills those in without
 -- clearing the table, and a hand edited cell is left alone.
-AGF.ROW_SCHEMA = 4
+AGF.ROW_SCHEMA = 5
 
 -- Guild recruitment used to sit in the PvE and PvP tabs. It has its own section
 -- now, so stored guild rows are carried across once instead of being stranded
@@ -1304,10 +1314,25 @@ function AGF.MigrateRows()
 					end
 					row.target = row.target or parsed.target
 					row.mythicKey = row.mythicKey or parsed.mythicLevel
+					if row.mythic == nil then
+						row.mythic = parsed.mythic
+					end
+					-- Mythic used to replace the row kind outright, which
+					-- filed every mythic raid and every mythic Manastorm
+					-- post under Dungeon and hid it from its own activity
+					-- filter. The kind follows the activity now, so a
+					-- stored row takes the kind and caption the parse
+					-- gives it.
+					if row.kind == "MYTHIC" and parsed.kind
+						and parsed.kind ~= "MYTHIC" then
+						row.kind = parsed.kind
+						row.activityName = parsed.activityName
+						row.activityShort = parsed.activityShort
+					end
 					-- Keystone numbers were stored as character levels in
 					-- older builds, which is what made Level 60 mode hide
 					-- them. A mythic row has no level.
-					if row.kind == "MYTHIC" then
+					if row.kind == "MYTHIC" or row.mythic == true then
 						row.level = nil
 					end
 					if row.levelling == nil then
@@ -1448,6 +1473,9 @@ function AGF.HandleMessage(event, message, sender, arg4, arg9, source)
 	-- The keystone level the post named, nil when it named none. The key range
 	-- filter reads this, so a row stored by an older build counts as unnamed.
 	row.mythicKey = parsed.mythicLevel
+	-- True when the post is about a mythic run, whatever category it sits in, so
+	-- the keystone rules never have to read the row kind.
+	row.mythic = parsed.mythic
 	-- Normal, Heroic, Mythic or Ascended, nil when the post named none. A
 	-- hand edited Diff cell is kept, the same as every other edited cell.
 	if not row.locked.diff then

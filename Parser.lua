@@ -3,7 +3,7 @@
 -- What counts as an activity comes from the active pack, see Packs.lua.
 
 AGF = AGF or {}
-AGF.VERSION = "1.2"
+AGF.VERSION = "1.2.1"
 
 local function trim(s)
 	s = s:gsub("^%s+", "")
@@ -1563,6 +1563,10 @@ function AGF.Parse(raw)
 	t, ilvl = AGF.MarkIlvl(t)
 	local actId, actName, actShort, target = AGF.MatchActivity(t)
 	local mythicLevel
+	-- True when the line is about a mythic run, whatever category it belongs to.
+	-- Kept apart from the row kind, because a mythic raid is still a raid and
+	-- only its difficulty changes.
+	local isMythicRow = false
 
 	-- A line that opens with wts / wtb / wtt is trade whatever it names.
 	local head = t:match("^%s*(%a+)")
@@ -1729,12 +1733,15 @@ function AGF.Parse(raw)
 		end
 	else
 		kind = actId or "OTHER"
-		-- Mythic runs are their own axis in PvE. The keystone level replaces the
-		-- caption and the dungeon stays in the target, so a row reads
+		-- Mythic is a difficulty, not a category. The row kind decides which
+		-- activity filter a row answers to, so a mythic raid keeps the RAID kind
+		-- and only a five man post becomes MYTHIC. The keystone level replaces
+		-- the caption and the place stays in the target, so a row reads
 		-- "Mythic+ 7: Uldaman".
-		-- Guild recruitment stays a guild even when the advert promises
-		-- mythic runs, and a world boss is never a keystone.
-		if actId ~= "WB" and actId ~= "WBT" and actId ~= "GUILD" then
+		-- Guild recruitment stays a guild even when the advert promises mythic
+		-- runs, a world boss is never a keystone, and Manastorm is not a dungeon.
+		if actId ~= "WB" and actId ~= "WBT" and actId ~= "GUILD"
+			and actId ~= "MS" then
 			local isMythic, keyLevel = AGF.MatchMythic(t)
 			-- "m2" on its own is a tier, not a place, so it leaves the target
 			-- and becomes the caption.
@@ -1744,16 +1751,22 @@ function AGF.Parse(raw)
 				keyLevel = keyLevel or tonumber(tier)
 				target = nil
 			end
+			isMythicRow = isMythic and true or false
 			if isMythic and actId == "RAID" then
 				-- The realm runs mythic raids as well, but a keystone level never
 				-- belongs to one. A number in "LFM MC Mythic 1 tank" counts
 				-- players, so the plus and the level both go: "Mythic: Molten
-				-- Core".
-				kind = "MYTHIC"
+				-- Core". The kind stays RAID, so the row is still a raid to every
+				-- filter and every count.
 				mythicLevel = nil
 				actName, actShort = "Mythic", "Mythic"
 			elseif isMythic then
-				kind = "MYTHIC"
+				-- A random dungeon keeps the RDF kind. The Random Dungeon entry in
+				-- the activity filter matches on kind, so overwriting it here made
+				-- those rows unreachable under it.
+				if actId ~= "RDF" then
+					kind = "MYTHIC"
+				end
 				mythicLevel = keyLevel
 				if keyLevel and keyLevel > 0 then
 					actName = "Mythic+ " .. keyLevel
@@ -1778,7 +1791,7 @@ function AGF.Parse(raw)
 	-- A keystone run is level cap content, always. Whatever number the line
 	-- carries is the key, the dungeon wing or the group size, never the level
 	-- of a character, so a mythic row never keeps a level at all.
-	if kind == "MYTHIC" or mythicLevel or has(t, "keystone")
+	if kind == "MYTHIC" or isMythicRow or mythicLevel or has(t, "keystone")
 		or has(t, "keystones") then
 		level, bracket = nil, false
 	end
@@ -1801,8 +1814,14 @@ function AGF.Parse(raw)
 	-- group that asks for a carry is not, and a sold boost sits in Trade, so
 	-- both are left alone.
 	if not levelling and route ~= "TRADE" and kind ~= "MYTHIC"
-		and not mythicLevel and AGF.ParseBoost(t) then
+		and not isMythicRow and not mythicLevel and AGF.ParseBoost(t) then
 		levelling = true
+	end
+	-- A key is Mythic by definition, and so is a mythic raid that names no key
+	-- at all, so the difficulty follows the mythic flag as well as the level.
+	local diffHint = mythicLevel
+	if diffHint == nil and isMythicRow then
+		diffHint = 0
 	end
 	return {
 		intent = intent,
@@ -1812,7 +1831,10 @@ function AGF.Parse(raw)
 		activityName = actName,
 		activityShort = actShort,
 		mythicLevel = mythicLevel,
-		difficulty = AGF.ParseDifficulty(t, mythicLevel),
+		-- A mythic run whatever its category, so the keystone rules can stop
+		-- reading the row kind.
+		mythic = isMythicRow or nil,
+		difficulty = AGF.ParseDifficulty(t, diffHint),
 		levelling = levelling,
 		profession = profession,
 		profMode = profMode,

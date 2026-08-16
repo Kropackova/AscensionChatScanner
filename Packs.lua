@@ -181,7 +181,7 @@ local RAID_WORDS = {
 -- every Activity submenu.
 local RAID_TARGETS = {
 	"molten core", "blackwing lair", "zul gurub", "zulgurub",
-	"ruins of ahn qiraj", "temple of ahn qiraj",
+	"ruins of ahn qiraj", "temple of ahn qiraj", "ahn qiraj",
 	"mc", "bwl", "ony", "onyxia", "zg", "aq20", "aq40", "naxx", "nax",
 	"naxxramas",
 }
