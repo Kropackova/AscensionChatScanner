@@ -2,6 +2,43 @@
 
 All notable changes to Ascension Chat Scanner.
 
+## 1.2.1
+
+### Fixed
+
+- Mythic raid posts were filed under Dungeon. A line like `LFM MC Mythic` was
+  stored with the `MYTHIC` kind, so it appeared as "Mythic: Onyxia" with the
+  Dungeon filter on and disappeared with Raid on. Mythic is a difficulty, not a
+  category: the row keeps its `RAID` kind, the caption still reads "Mythic" and
+  the Diff column reads Mythic. This covers every raid in the packs - Molten
+  Core, Blackwing Lair, Zul'Gurub, Onyxia, AQ20, AQ40, Naxxramas, and the TBC
+  raids from Karazhan to Sunwell Plateau - including lines that only say "key"
+  or "keys".
+- The Mythic difficulty option under the Raid category was unreachable, because
+  no row could be a raid and mythic at the same time. It filters now.
+- Manastorm posts that mentioned mythic were filed under Dungeon. Manastorm is
+  excluded from the mythic override, the same as guild recruitment and world
+  bosses.
+- A mythic random dungeon post could not be reached under Dungeon > Random
+  Dungeon. The row keeps its `RDF` kind, so the Random Dungeon entry matches it.
+- Target counts and the target submenu counted mythic raids under Dungeon
+  instead of Raid.
+- The keystone rules read the row kind, which broke once a mythic row could keep
+  another kind. Level 60 mode and the key range filter read a dedicated mythic
+  flag instead, so a mythic raid no longer answers the key range filter and a
+  mythic five man is still exempt from the level cap check.
+- "Ahn'Qiraj" written without "ruins of" or "temple of" was not recognised as a
+  raid target. Bare "aq" is still left alone, it is ambiguous between AQ20 and
+  AQ40.
+
+### Changed
+
+- Row schema is 5, so rows saved by 1.2 and older are reparsed on load. A stored
+  row that carries the `MYTHIC` kind takes the kind and caption its message
+  really implies, and hand edited cells are kept as always.
+- New row field `mythic`, true when a post is about a mythic run whatever
+  category it sits in. The keystone rules read it instead of the row kind.
+  
 ## 1.2
 
 **New**
